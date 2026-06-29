@@ -3,14 +3,27 @@ import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { AppError } from "../lib/errors.js";
 
+function formatZodError(err: ZodError) {
+  const flattened = err.flatten();
+  const fieldMessages = err.issues.map((issue) => {
+    const field = issue.path.join(".");
+    return field ? `${field} ${issue.message}` : issue.message;
+  });
+  return {
+    message: fieldMessages.length > 0 ? fieldMessages.join("；") : "Request validation failed",
+    details: flattened,
+  };
+}
+
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
+    const validationError = formatZodError(err);
     return res.status(400).json({
       success: false,
       error: {
         code: "VALIDATION_ERROR",
-        message: "Request validation failed",
-        details: err.flatten(),
+        message: validationError.message,
+        details: validationError.details,
       },
     });
   }

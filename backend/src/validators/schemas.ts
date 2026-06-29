@@ -94,8 +94,9 @@ export const createTeacherSchema = z.object({
 
 export const updateTeacherSchema = createTeacherSchema.partial();
 
-const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const timeStringSchema = z.string().regex(/^\d{1,2}:\d{2}$/);
+const nonEmptyStringSchema = z.string().trim().min(1, "不能为空");
+const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "格式必须为 YYYY-MM-DD");
+const timeStringSchema = z.string().regex(/^\d{1,2}:\d{2}$/, "格式必须为 HH:mm");
 
 export const createScheduleSchema = z.object({
   studentId: z.string().min(1).optional(),
@@ -118,10 +119,17 @@ export const createScheduleSchema = z.object({
 });
 
 export const scheduleQuerySchema = z.object({
-  studentId: z.string().min(1).optional(),
-  teacherId: z.string().min(1).optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
+  startDate: dateStringSchema.optional(),
+  endDate: dateStringSchema.optional(),
+  weekStart: dateStringSchema.optional(),
+  weekEnd: dateStringSchema.optional(),
+  dateFrom: dateStringSchema.optional(),
+  dateTo: dateStringSchema.optional(),
+  teacherId: nonEmptyStringSchema.optional(),
+  studentId: nonEmptyStringSchema.optional(),
+  classId: nonEmptyStringSchema.optional(),
+  courseId: nonEmptyStringSchema.optional(),
+  status: z.enum(["scheduled", "completed", "cancelled"]).optional(),
 });
 
 export const updateScheduleSchema = z.object({

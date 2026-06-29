@@ -22,6 +22,18 @@ export type CreateScheduleInput = {
   status?: "scheduled" | "completed" | "cancelled";
 };
 
+export type ListScheduleFilters = {
+  startDate?: string | Date | null;
+  endDate?: string | Date | null;
+  weekStart?: string | Date | null;
+  weekEnd?: string | Date | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  classId?: string | null;
+  courseId?: string | null;
+  status?: "scheduled" | "completed" | "cancelled" | "" | null;
+};
+
 export const scheduleApiState = {
   list: createApiCallState<Schedule[]>(),
   create: createApiCallState<{ event: Schedule; hasConflict: boolean }>(),
@@ -78,6 +90,36 @@ function toCreateSchedulePayload(input: CreateScheduleInput) {
   };
 }
 
+function isValidDate(value: Date) {
+  return !Number.isNaN(value.getTime());
+}
+
+function toDateQueryValue(value: string | Date | null | undefined) {
+  if (!value) return undefined;
+  if (value instanceof Date) return isValidDate(value) ? value.toISOString().slice(0, 10) : undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  return value;
+}
+
+function appendQueryParam(params: URLSearchParams, key: string, value: string | null | undefined) {
+  if (value === undefined || value === null || value.trim() === "") return;
+  if (value === "undefined" || value === "null" || value === "Invalid Date") return;
+  params.set(key, value);
+}
+
+function buildScheduleQuery(filters: ListScheduleFilters = {}) {
+  const params = new URLSearchParams();
+  appendQueryParam(params, "startDate", toDateQueryValue(filters.startDate ?? filters.weekStart));
+  appendQueryParam(params, "endDate", toDateQueryValue(filters.endDate ?? filters.weekEnd));
+  appendQueryParam(params, "teacherId", filters.teacherId ?? undefined);
+  appendQueryParam(params, "studentId", filters.studentId ?? undefined);
+  appendQueryParam(params, "classId", filters.classId ?? undefined);
+  appendQueryParam(params, "courseId", filters.courseId ?? undefined);
+  appendQueryParam(params, "status", filters.status ?? undefined);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 function detectConflict(newEvent: Schedule, existing: Schedule[]): boolean {
   return existing.some(
     (ev) =>
@@ -88,12 +130,13 @@ function detectConflict(newEvent: Schedule, existing: Schedule[]): boolean {
 }
 
 export const scheduleService = {
-  async listEvents(): Promise<Schedule[]> {
+  async listEvents(filters: ListScheduleFilters = {}): Promise<Schedule[]> {
     return apiClient.requestWithFallback<Schedule[]>(
-      "/schedules",
+      `/schedules${buildScheduleQuery(filters)}`,
       { method: "GET" },
       () => [...seedEvents],
-      scheduleApiState.list
+      scheduleApiState.list,
+      "排课列表查询失败"
     );
   },
 
@@ -110,7 +153,8 @@ export const scheduleService = {
       const hasConflict = detectConflict(event, existingEvents);
       return { event, hasConflict };
       },
-      scheduleApiState.create
+      scheduleApiState.create,
+      "排课创建失败"
     );
   },
 
@@ -127,7 +171,8 @@ export const scheduleService = {
         startTime: "10:00",
         duration: 1,
       }),
-      scheduleApiState.update
+      scheduleApiState.update,
+      "排课更新失败"
     );
     if (scheduleApiState.update.status === "error") {
       return existingEvents.filter((e) => e.id !== eventId);

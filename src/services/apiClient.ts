@@ -20,12 +20,17 @@ export type ApiEnvelope<T> = {
 export class ApiClientError extends Error {
   status?: number;
   code?: string;
+  details?: unknown;
+  method?: string;
+  url?: string;
+  requestPayload?: unknown;
 
-  constructor(message: string, status?: number, code?: string) {
+  constructor(message: string, status?: number, code?: string, details?: unknown) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -47,6 +52,24 @@ function buildUrl(path: string) {
 function getAuthHeader() {
   const token = typeof window !== "undefined" ? localStorage.getItem("astralink.auth.token") : null;
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function formatValidationDetails(details: unknown) {
+  if (!details || typeof details !== "object") return null;
+  const fieldErrors = "fieldErrors" in details ? (details as { fieldErrors?: Record<string, string[]> }).fieldErrors : null;
+  if (!fieldErrors) return null;
+  const messages = Object.entries(fieldErrors)
+    .flatMap(([field, errors]) => (errors ?? []).map((message) => `${field} ${message}`));
+  return messages.length > 0 ? messages.join("；") : null;
+}
+
+function parseRequestPayload(body: BodyInit | null | undefined) {
+  if (typeof body !== "string") return body;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
 }
 
 export function createApiCallState<T>(): ApiCallState<T> {
@@ -74,6 +97,8 @@ export function setApiError<T>(state: ApiCallState<T>, error: string) {
 
 export const apiClient = {
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const method = options.method ?? "GET";
+    const url = buildUrl(path);
     const response = await fetch(buildUrl(path), {
       ...options,
       headers: {
@@ -87,17 +112,33 @@ export const apiClient = {
 
     if (!response.ok) {
       const envelope = payload as ApiEnvelope<T> | null;
-      throw new ApiClientError(
-        envelope?.error?.message ?? `API request failed: ${response.status}`,
+      const detailsMessage = formatValidationDetails(envelope?.error?.details);
+      const error = new ApiClientError(
+        detailsMessage ?? envelope?.error?.message ?? `API request failed: ${response.status}`,
         response.status,
-        envelope?.error?.code
+        envelope?.error?.code,
+        envelope?.error?.details
       );
+      error.method = method;
+      error.url = url;
+      error.requestPayload = parseRequestPayload(options.body);
+      throw error;
     }
 
     if (payload && typeof payload === "object" && "success" in payload) {
       const envelope = payload as ApiEnvelope<T>;
       if (!envelope.success) {
-        throw new ApiClientError(envelope.error?.message ?? "API request failed", response.status, envelope.error?.code);
+        const detailsMessage = formatValidationDetails(envelope.error?.details);
+        const error = new ApiClientError(
+          detailsMessage ?? envelope.error?.message ?? "API request failed",
+          response.status,
+          envelope.error?.code,
+          envelope.error?.details
+        );
+        error.method = method;
+        error.url = url;
+        error.requestPayload = parseRequestPayload(options.body);
+        throw error;
       }
       return envelope.data as T;
     }
@@ -109,7 +150,8 @@ export const apiClient = {
     path: string,
     options: RequestInit,
     fallback: () => T | Promise<T>,
-    state?: ApiCallState<T>
+    state?: ApiCallState<T>,
+    errorLabel = "后端接口请求失败"
   ): Promise<T> {
     setApiLoading(state ?? createApiCallState<T>());
     try {
@@ -119,7 +161,7 @@ export const apiClient = {
     } catch (error) {
       const message = error instanceof Error ? error.message : "API request failed";
       if (state) setApiError(state, message);
-      emitApiError(`后端接口请求失败，已切换到本地 mock 数据：${message}`);
+      emitApiError(`${errorLabel}，已切换到本地 mock 数据：${message}`);
       return fallback();
     }
   },

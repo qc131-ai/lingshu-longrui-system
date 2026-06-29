@@ -52,7 +52,10 @@ export function Schedule() {
   const refreshEvents = async () => {
     setIsLoadingSchedule(true);
     try {
-      const latestEvents = await scheduleService.listEvents();
+      const latestEvents = await scheduleService.listEvents({
+        startDate: format(startDate, 'yyyy-MM-dd'),
+        endDate: format(addDays(startDate, 6), 'yyyy-MM-dd'),
+      });
       setEvents(latestEvents);
     } catch {
       toast.error('排课日历加载失败，已保留本地数据');

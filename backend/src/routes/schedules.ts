@@ -121,10 +121,16 @@ schedulesRouter.get(
     Object.assign(where, await scheduleScope(req.user));
 
     if (query.teacherId) where.teacherId = query.teacherId as string;
-    if (query.dateFrom || query.dateTo) {
+    if (query.classId) where.classId = query.classId as string;
+    if (query.courseId) where.courseId = query.courseId as string;
+    if (query.status) where.status = toPrismaEnum(query.status as string) as ScheduleStatus;
+
+    const startDate = (query.startDate ?? query.weekStart ?? query.dateFrom) as string | undefined;
+    const endDate = (query.endDate ?? query.weekEnd ?? query.dateTo) as string | undefined;
+    if (startDate || endDate) {
       where.lessonDate = {
-        gte: query.dateFrom ? dateOnly(query.dateFrom as string) : undefined,
-        lte: query.dateTo ? dateOnly(query.dateTo as string) : undefined,
+        gte: startDate ? dateOnly(startDate) : undefined,
+        lte: endDate ? dateOnly(endDate) : undefined,
       };
     }
     if (query.studentId) {
