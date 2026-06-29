@@ -94,16 +94,27 @@ export const createTeacherSchema = z.object({
 
 export const updateTeacherSchema = createTeacherSchema.partial();
 
+const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const timeStringSchema = z.string().regex(/^\d{1,2}:\d{2}$/);
+
 export const createScheduleSchema = z.object({
+  studentId: z.string().min(1).optional(),
   courseId: z.string().min(1).optional(),
   courseName: z.string().optional(),
   teacherId: z.string().min(1).optional(),
   teacher: z.string().optional(),
   classId: z.string().min(1).optional(),
   roomId: z.string().optional(),
-  date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
-  startTime: z.string().regex(/^\\d{1,2}:\\d{2}$/),
-  duration: z.coerce.number().positive(),
+  classroom: z.string().optional(),
+  date: dateStringSchema,
+  startTime: timeStringSchema,
+  endTime: timeStringSchema.optional(),
+  duration: z.coerce.number().positive().optional(),
+  consumedHours: z.coerce.number().positive().optional(),
+  lessonType: z.enum(["class", "exam", "meeting"]).optional(),
+  status: z.enum(["scheduled", "completed", "cancelled"]).optional(),
+}).refine((input) => input.duration !== undefined || input.consumedHours !== undefined || input.endTime !== undefined, {
+  message: "duration, consumedHours, or endTime is required",
 });
 
 export const scheduleQuerySchema = z.object({
@@ -118,8 +129,8 @@ export const updateScheduleSchema = z.object({
   teacherId: z.string().min(1).optional(),
   classId: z.string().min(1).nullable().optional(),
   roomId: z.string().min(1).optional(),
-  date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).optional(),
-  startTime: z.string().regex(/^\\d{1,2}:\\d{2}$/).optional(),
+  date: dateStringSchema.optional(),
+  startTime: timeStringSchema.optional(),
   duration: z.coerce.number().positive().optional(),
   status: z.enum(["scheduled", "completed", "cancelled"]).optional(),
   cancelReason: z.string().optional(),
@@ -130,7 +141,7 @@ export const createLessonRecordSchema = z.object({
   classId: z.string().min(1),
   studentId: z.string().min(1),
   teacherId: z.string().min(1),
-  date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+  date: dateStringSchema,
   topic: z.string().optional(),
   attendance: z.enum(["present", "absent", "student_leave", "teacher_leave"]).optional(),
   status: z.enum(["completed", "scheduled", "cancelled", "need_makeup"]).optional(),
@@ -154,8 +165,8 @@ export const createLeaveRecordSchema = z.object({
   studentId: z.string().min(1).optional(),
   teacherId: z.string().min(1).optional(),
   classId: z.string().min(1),
-  originalDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
-  makeupDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).optional(),
+  originalDate: dateStringSchema,
+  makeupDate: dateStringSchema.optional(),
   reason: z.string().min(1),
   deductCredit: z.boolean().optional(),
   status: z.enum(["pending", "approved", "rejected", "makeup_scheduled", "makeup_completed"]).optional(),

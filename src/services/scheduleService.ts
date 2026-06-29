@@ -5,12 +5,21 @@ import { generateId } from "./config";
 import { apiClient, createApiCallState } from "./apiClient";
 
 export type CreateScheduleInput = {
+  studentId?: string;
+  classId?: string;
+  courseId?: string;
   courseName: string;
+  teacherId?: string;
   teacher: string;
   roomId: string;
+  classroom?: string;
   date: string;
   startTime: string;
+  endTime?: string;
   duration: number;
+  consumedHours?: number;
+  lessonType?: "class" | "exam" | "meeting";
+  status?: "scheduled" | "completed" | "cancelled";
 };
 
 export const scheduleApiState = {
@@ -44,6 +53,31 @@ function buildScheduleEvent(input: CreateScheduleInput): Schedule {
   };
 }
 
+function toTimeText(startTime: string, duration: number) {
+  const [hours, minutes] = startTime.split(":").map(Number);
+  return `${String(hours + duration).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function toCreateSchedulePayload(input: CreateScheduleInput) {
+  return {
+    studentId: input.studentId,
+    classId: input.classId,
+    courseId: input.courseId,
+    courseName: input.courseName,
+    teacherId: input.teacherId,
+    teacher: input.teacher,
+    roomId: input.roomId,
+    classroom: input.classroom ?? resolveRoomLabel(input.roomId),
+    date: input.date,
+    startTime: input.startTime,
+    endTime: input.endTime ?? toTimeText(input.startTime, input.duration),
+    duration: input.duration,
+    consumedHours: input.consumedHours ?? input.duration,
+    lessonType: input.lessonType ?? "class",
+    status: input.status ?? "scheduled",
+  };
+}
+
 function detectConflict(newEvent: Schedule, existing: Schedule[]): boolean {
   return existing.some(
     (ev) =>
@@ -70,7 +104,7 @@ export const scheduleService = {
   }> {
     return apiClient.requestWithFallback<{ event: Schedule; hasConflict: boolean }>(
       "/schedules",
-      { method: "POST", body: JSON.stringify(input) },
+      { method: "POST", body: JSON.stringify(toCreateSchedulePayload(input)) },
       () => {
       const event = buildScheduleEvent(input);
       const hasConflict = detectConflict(event, existingEvents);

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { Prisma, ScheduleStatus } from "@prisma/client";
+import { Prisma, ScheduleEventType, ScheduleStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { created, ok } from "../lib/response.js";
@@ -39,20 +39,50 @@ function addHours(time: Date, hours: number) {
 }
 
 async function resolveCourse(organizationId: string, courseId?: string, courseName?: string) {
-  if (courseId) return prisma.course.findFirst({ where: { id: courseId, organizationId } });
+  if (courseId) {
+    const course = await prisma.course.findFirst({ where: { id: courseId, organizationId } });
+    if (course) return course;
+  }
   if (courseName) return prisma.course.findFirst({ where: { name: courseName, organizationId } });
   return null;
 }
 
 async function resolveTeacher(organizationId: string, teacherId?: string, teacher?: string) {
-  if (teacherId) return prisma.teacher.findFirst({ where: { id: teacherId, organizationId } });
+  if (teacherId) {
+    const resolvedTeacher = await prisma.teacher.findFirst({ where: { id: teacherId, organizationId } });
+    if (resolvedTeacher) return resolvedTeacher;
+  }
   if (teacher) return prisma.teacher.findFirst({ where: { name: teacher, organizationId } });
   return null;
 }
 
-async function resolveRoom(organizationId: string, roomId?: string) {
-  if (!roomId) return null;
-  return prisma.room.findFirst({ where: { organizationId, OR: [{ id: roomId }, { code: roomId }] } });
+async function resolveRoom(organizationId: string, roomId?: string, classroom?: string) {
+  if (!roomId && !classroom) return null;
+  return prisma.room.findFirst({
+    where: {
+      organizationId,
+      OR: [
+        roomId ? { id: roomId } : undefined,
+        roomId ? { code: roomId } : undefined,
+        classroom ? { code: classroom } : undefined,
+        classroom ? { label: classroom } : undefined,
+      ].filter(Boolean) as Prisma.RoomWhereInput[],
+    },
+  });
+}
+
+function diffHours(startTime: Date, endTime: Date) {
+  return (endTime.getTime() - startTime.getTime()) / (60 * 60 * 1000);
+}
+
+function resolveDurationHours(input: { duration?: number; consumedHours?: number; startTime: string; endTime?: string }) {
+  if (input.duration !== undefined) return Number(input.duration);
+  if (input.consumedHours !== undefined) return Number(input.consumedHours);
+  if (input.endTime) {
+    const duration = diffHours(timeOnly(input.startTime), timeOnly(input.endTime));
+    if (duration > 0) return duration;
+  }
+  throw badRequest("Schedule duration is required");
 }
 
 async function detectConflict(input: {
@@ -122,7 +152,7 @@ schedulesRouter.post(
     const [course, teacher, room] = await Promise.all([
       resolveCourse(req.user.organizationId, input.courseId, input.courseName),
       resolveTeacher(req.user.organizationId, input.teacherId, input.teacher),
-      resolveRoom(req.user.organizationId, input.roomId),
+      resolveRoom(req.user.organizationId, input.roomId, input.classroom),
     ]);
 
     if (!course) throw badRequest("Course is required");
@@ -130,7 +160,8 @@ schedulesRouter.post(
     if (!room) throw badRequest("Room is required");
 
     const startTime = timeOnly(input.startTime);
-    const endTime = addHours(startTime, Number(input.duration));
+    const durationHours = resolveDurationHours(input);
+    const endTime = input.endTime ? timeOnly(input.endTime) : addHours(startTime, durationHours);
     const lessonDate = dateOnly(input.date);
     const hasConflict = await detectConflict({
       lessonDate,
@@ -150,11 +181,14 @@ schedulesRouter.post(
         classId: input.classId,
         roomId: room.id,
         title: course.name,
+        eventType: input.lessonType ? (toPrismaEnum(input.lessonType) as ScheduleEventType) : ScheduleEventType.CLASS,
         lessonDate,
         startTime,
-        durationHours: Number(input.duration),
+        durationHours,
         endTime,
+        status: input.status ? (toPrismaEnum(input.status) as ScheduleStatus) : ScheduleStatus.SCHEDULED,
         hasConflict: false,
+        createdBy: req.user.id,
       },
       include: scheduleInclude,
     });
@@ -163,7 +197,18 @@ schedulesRouter.post(
       action: "create_schedule",
       resourceType: "schedule",
       resourceId: schedule.id,
-      detail: { title: schedule.title, date: input.date, startTime: input.startTime },
+      detail: {
+        title: schedule.title,
+        courseId: course.id,
+        teacherId: teacher.id,
+        classId: input.classId,
+        roomId: room.id,
+        date: input.date,
+        startTime: input.startTime,
+        endTime: input.endTime ?? `${String(endTime.getUTCHours()).padStart(2, "0")}:${String(endTime.getUTCMinutes()).padStart(2, "0")}`,
+        durationHours,
+        status: input.status ?? "scheduled",
+      },
     });
 
     return created(res, { event: toSchedule(schedule), hasConflict });

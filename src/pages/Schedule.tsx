@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, MapPin, User, Clock, CheckCircle2 } from 'lucide-react';
 import { format, addDays, startOfWeek } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
@@ -11,16 +11,20 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { can } from '../auth/permissions';
 
-const scheduleTeacherOptions = scheduleService.getTeacherOptionsSync();
-
 export function Schedule() {
-  const { courses, students } = useAppContext();
+  const { courses, students, teachers } = useAppContext();
   const { user } = useAuth();
   const today = new Date();
   const startDate = startOfWeek(today, { weekStartsOn: 1 }); // Start week on Monday
 
   const weekDays = Array.from({ length: 7 }).map((_, i) => addDays(startDate, i));
   const timeSlots = Array.from({ length: 13 }).map((_, i) => `${i + 8}:00`); // 8:00 to 20:00
+  const scheduleTeacherOptions = useMemo(
+    () => teachers.length > 0
+      ? teachers.map((teacher) => ({ id: teacher.id, name: teacher.name }))
+      : scheduleService.getTeacherOptionsSync(),
+    [teachers]
+  );
 
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
@@ -38,6 +42,12 @@ export function Schedule() {
     startTime: '10:00',
     duration: 2,
   });
+
+  useEffect(() => {
+    if (scheduleTeacherOptions.length === 0) return;
+    if (scheduleTeacherOptions.some((teacher) => teacher.id === formData.teacherId)) return;
+    setFormData((prev) => ({ ...prev, teacherId: scheduleTeacherOptions[0].id }));
+  }, [formData.teacherId, scheduleTeacherOptions]);
 
   const refreshEvents = async () => {
     setIsLoadingSchedule(true);
@@ -65,17 +75,23 @@ export function Schedule() {
     const course = courses.find(c => c.id === formData.courseId);
     if (!course) return;
 
-    const teacher = scheduleTeacherOptions.find(t => t.id === formData.teacherId)?.name ?? '李老师';
+    const teacherOption = scheduleTeacherOptions.find(t => t.id === formData.teacherId);
+    const teacher = teacherOption?.name ?? '李老师';
 
     setIsSavingSchedule(true);
     try {
       const { event, hasConflict } = await scheduleService.createSchedule({
+        courseId: course.id,
         courseName: course.name,
+        teacherId: teacherOption?.id,
         teacher,
         roomId: formData.roomId,
         date: formData.date,
         startTime: formData.startTime,
         duration: formData.duration,
+        consumedHours: formData.duration,
+        lessonType: 'class',
+        status: 'scheduled',
       }, events);
 
       if (hasConflict) {
