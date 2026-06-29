@@ -1,0 +1,865 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN            @map("admin")
+  ACADEMIC_MANAGER @map("academic_manager")
+  ADVISOR          @map("advisor")
+  TEACHER          @map("teacher")
+  FINANCE          @map("finance")
+}
+
+enum UserStatus {
+  ACTIVE   @map("active")
+  DISABLED @map("disabled")
+}
+
+enum StudentRiskStatus {
+  HIGH   @map("high")
+  MEDIUM @map("medium")
+  LOW    @map("low")
+  NORMAL @map("normal")
+}
+
+enum StudentStatus {
+  ACTIVE    @map("active")
+  GRADUATED @map("graduated")
+  ARCHIVED  @map("archived")
+}
+
+enum CourseCategory {
+  MATH        @map("math")
+  PHYSICS     @map("physics")
+  CHEMISTRY   @map("chemistry")
+  ENGLISH     @map("english")
+  COMPETITION @map("competition")
+  RESEARCH    @map("research")
+}
+
+enum CourseStatus {
+  ACTIVE   @map("active")
+  DRAFT    @map("draft")
+  ARCHIVED @map("archived")
+}
+
+enum TeacherType {
+  FULL_TIME @map("full-time")
+  PART_TIME @map("part-time")
+}
+
+enum ScheduleStatus {
+  SCHEDULED @map("scheduled")
+  COMPLETED @map("completed")
+  CANCELLED @map("cancelled")
+}
+
+enum ScheduleEventType {
+  CLASS   @map("class")
+  EXAM    @map("exam")
+  MEETING @map("meeting")
+}
+
+enum LessonAttendance {
+  PRESENT       @map("present")
+  ABSENT        @map("absent")
+  STUDENT_LEAVE @map("student_leave")
+  TEACHER_LEAVE @map("teacher_leave")
+}
+
+enum LessonStatus {
+  SCHEDULED   @map("scheduled")
+  COMPLETED   @map("completed")
+  CANCELLED   @map("cancelled")
+  NEED_MAKEUP @map("need_makeup")
+}
+
+enum LessonFeedbackStatus {
+  PENDING   @map("pending")
+  SUBMITTED @map("submitted")
+}
+
+enum LeaveRequestType {
+  STUDENT_LEAVE @map("student_leave")
+  TEACHER_LEAVE @map("teacher_leave")
+  RESCHEDULE    @map("reschedule")
+  CANCEL        @map("cancel")
+  MAKEUP        @map("makeup")
+}
+
+enum LeaveRequestStatus {
+  PENDING          @map("pending")
+  APPROVED         @map("approved")
+  REJECTED         @map("rejected")
+  MAKEUP_SCHEDULED @map("makeup_scheduled")
+  MAKEUP_COMPLETED @map("makeup_completed")
+}
+
+enum CreditAdjustType {
+  PURCHASE      @map("purchase")
+  GIFT          @map("gift")
+  TRANSFER_IN   @map("transfer_in")
+  MAKEUP_RETURN @map("makeup_return")
+  DEDUCT        @map("deduct")
+  REFUND        @map("refund")
+  TRANSFER_OUT  @map("transfer_out")
+  MANUAL        @map("manual")
+  LESSON_DEDUCT @map("lesson_deduct")
+}
+
+enum CreditTransactionStatus {
+  PAID     @map("paid")
+  PENDING  @map("pending")
+  REFUNDED @map("refunded")
+}
+
+enum ParentReportStatus {
+  DRAFT     @map("draft")
+  GENERATED @map("generated")
+  SENT      @map("sent")
+}
+
+enum AiMessageRole {
+  USER      @map("user")
+  ASSISTANT @map("assistant")
+  SYSTEM    @map("system")
+}
+
+enum AiQueryIntent {
+  CREDIT_WARNING @map("credit_warning")
+  REPORT         @map("report")
+  MAKEUP         @map("makeup")
+  DEFAULT        @map("default")
+}
+
+enum AiTaskType {
+  LESSON_FEEDBACK       @map("lesson_feedback")
+  PARENT_REPORT_SUMMARY @map("parent_report_summary")
+  RENEWAL_SUGGESTION    @map("renewal_suggestion")
+  LEARNING_SUMMARY      @map("learning_summary")
+  CHAT                  @map("chat")
+}
+
+enum AiTaskStatus {
+  PENDING    @map("pending")
+  PROCESSING @map("processing")
+  COMPLETED  @map("completed")
+  FAILED     @map("failed")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(200)
+  code      String   @unique @db.VarChar(80)
+  status    String   @default("active") @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  roles               Role[]
+  users               User[]
+  students            Student[]
+  courses             Course[]
+  classes             Class[]
+  teachers            Teacher[]
+  rooms               Room[]
+  schedules           Schedule[]
+  classEnrollments    ClassEnrollment[]
+  lessonRecords       LessonRecord[]
+  leaveRecords        LeaveRecord[]
+  leaveMakeupRequests LeaveMakeupRequest[]
+  creditAccounts      CreditAccount[]
+  creditTransactions  CreditTransaction[]
+  parentReports       ParentReport[]
+  aiMessages          AiMessage[]
+  aiTasks             AiTask[]
+  operationLogs       OperationLog[]
+  files               UploadedFile[]
+  importLogs          ImportLog[]
+  orders              Order[]
+  homeworks           Homework[]
+  assessments         Assessment[]
+  competitionProjects CompetitionProject[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String?    @map("organization_id") @db.Uuid
+  email          String     @unique @db.VarChar(255)
+  phone          String?    @unique @db.VarChar(20)
+  passwordHash   String     @map("password_hash") @db.VarChar(255)
+  displayName    String     @map("display_name") @db.VarChar(100)
+  role           UserRole
+  status         UserStatus @default(ACTIVE)
+  avatarUrl      String?    @map("avatar_url")
+  lastLoginAt    DateTime?  @map("last_login_at") @db.Timestamptz
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization        Organization?        @relation(fields: [organizationId], references: [id])
+  roles               UserRoleAssignment[]
+  advisorStudents     Student[]            @relation("StudentAdvisor")
+  teacherProfile      Teacher?
+  createdSchedules    Schedule[]           @relation("ScheduleCreator")
+  creditActions       CreditTransaction[]
+  parentReports       ParentReport[]
+  aiMessages          AiMessage[]
+  aiTasks             AiTask[]
+  operationLogs       OperationLog[]
+  uploadedFiles       UploadedFile[]
+  orders              Order[]
+  homeworks           Homework[]
+  assessments         Assessment[]
+  competitionProjects CompetitionProject[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Role {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(80)
+  name           String   @db.VarChar(100)
+  description    String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization?        @relation(fields: [organizationId], references: [id])
+  users        UserRoleAssignment[]
+  permissions  RolePermission[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(120)
+  name        String   @db.VarChar(120)
+  module      String   @db.VarChar(80)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  roles RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model UserRoleAssignment {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid()) @db.Uuid
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model Student {
+  id                     String            @id @default(uuid()) @db.Uuid
+  organizationId         String?           @map("organization_id") @db.Uuid
+  name                   String            @db.VarChar(100)
+  phone                  String            @unique @db.VarChar(20)
+  grade                  String            @default("10年级") @db.VarChar(50)
+  school                 String?           @db.VarChar(200)
+  avatarUrl              String?           @map("avatar_url")
+  riskStatus             StudentRiskStatus @default(NORMAL) @map("risk_status")
+  status                 StudentStatus     @default(ACTIVE)
+  tags                   Json?
+  enrollmentDate         DateTime          @default(now()) @map("enrollment_date") @db.Date
+  advisorId              String?           @map("advisor_id") @db.Uuid
+  recentTestScore        Decimal?          @map("recent_test_score") @db.Decimal(5, 2)
+  targetCountry          String?           @map("target_country") @db.VarChar(100)
+  targetDirection        String?           @map("target_direction") @db.VarChar(100)
+  parentPhone            String?           @map("parent_phone") @db.VarChar(20)
+  notes                  String?
+  aiLearningSummary      String?           @map("ai_learning_summary")
+  homeworkOverdueWarning String?           @map("homework_overdue_warning")
+  createdAt              DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt              DateTime?         @map("deleted_at") @db.Timestamptz
+
+  organization       Organization?       @relation(fields: [organizationId], references: [id])
+  advisor            User?               @relation("StudentAdvisor", fields: [advisorId], references: [id])
+  enrollments        ClassEnrollment[]
+  lessonRecords      LessonRecord[]
+  leaveRecords       LeaveRecord[]
+  creditAccount      CreditAccount?
+  creditTransactions CreditTransaction[]
+  parentReports      ParentReport[]
+  aiTasks            AiTask[]
+  files              UploadedFile[]
+
+  @@index([organizationId])
+  @@index([advisorId])
+  @@index([riskStatus])
+  @@index([enrollmentDate])
+  @@map("students")
+}
+
+model Course {
+  id                   String         @id @default(uuid()) @db.Uuid
+  organizationId       String?        @map("organization_id") @db.Uuid
+  name                 String         @db.VarChar(200)
+  category             CourseCategory
+  level                String         @db.VarChar(100)
+  totalLessons         Int            @map("total_lessons")
+  price                Decimal        @db.Decimal(12, 2)
+  description          String?
+  teachingMethod       String?        @map("teaching_method") @db.VarChar(200)
+  targetGrades         Json?          @map("target_grades")
+  responsibleTeacherId String?        @map("responsible_teacher_id") @db.Uuid
+  syllabus             String?
+  status               CourseStatus   @default(ACTIVE)
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization       Organization?       @relation(fields: [organizationId], references: [id])
+  classes            Class[]
+  schedules          Schedule[]
+  creditTransactions CreditTransaction[]
+
+  @@index([organizationId])
+  @@index([responsibleTeacherId])
+  @@map("courses")
+}
+
+model Class {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(200)
+  courseId       String   @map("course_id") @db.Uuid
+  teacherId      String   @map("teacher_id") @db.Uuid
+  scheduleDesc   String?  @map("schedule_desc") @db.VarChar(500)
+  capacity       Int
+  enrolledCount  Int      @default(0) @map("enrolled_count")
+  classroom      String?  @db.VarChar(100)
+  status         String   @default("active") @db.VarChar(20)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization  Organization?     @relation(fields: [organizationId], references: [id])
+  course        Course            @relation(fields: [courseId], references: [id])
+  teacher       Teacher           @relation(fields: [teacherId], references: [id])
+  enrollments   ClassEnrollment[]
+  schedules     Schedule[]
+  lessonRecords LessonRecord[]
+  leaveRecords  LeaveRecord[]
+
+  @@index([organizationId])
+  @@index([courseId])
+  @@index([teacherId])
+  @@map("classes")
+}
+
+model Teacher {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String?     @map("organization_id") @db.Uuid
+  userId         String?     @unique @map("user_id") @db.Uuid
+  name           String      @db.VarChar(100)
+  subjects       Json
+  type           TeacherType
+  rating         Decimal?    @db.Decimal(3, 2)
+  classesCount   Int         @default(0) @map("classes_count")
+  availableTime  Json?       @map("available_time")
+  feedbackRate   Decimal?    @map("feedback_rate") @db.Decimal(5, 2)
+  status         String      @default("active") @db.VarChar(20)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization  Organization?  @relation(fields: [organizationId], references: [id])
+  user          User?          @relation(fields: [userId], references: [id])
+  classes       Class[]
+  schedules     Schedule[]
+  lessonRecords LessonRecord[]
+  leaveRecords  LeaveRecord[]
+
+  @@index([organizationId])
+  @@map("teachers")
+}
+
+model Room {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String? @map("organization_id") @db.Uuid
+  code           String  @db.VarChar(50)
+  label          String  @db.VarChar(100)
+  capacity       Int?
+  status         String  @default("active") @db.VarChar(20)
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  schedules    Schedule[]
+
+  @@index([organizationId])
+  @@map("rooms")
+}
+
+model Schedule {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String?           @map("organization_id") @db.Uuid
+  courseId       String            @map("course_id") @db.Uuid
+  teacherId      String            @map("teacher_id") @db.Uuid
+  classId        String?           @map("class_id") @db.Uuid
+  roomId         String            @map("room_id") @db.Uuid
+  title          String            @db.VarChar(200)
+  eventType      ScheduleEventType @default(CLASS) @map("event_type")
+  lessonDate     DateTime          @map("lesson_date") @db.Date
+  startTime      DateTime          @map("start_time") @db.Time
+  durationHours  Decimal           @map("duration_hours") @db.Decimal(4, 2)
+  endTime        DateTime          @map("end_time") @db.Time
+  status         ScheduleStatus    @default(SCHEDULED)
+  hasConflict    Boolean?          @map("has_conflict")
+  createdBy      String?           @map("created_by") @db.Uuid
+  cancelledAt    DateTime?         @map("cancelled_at") @db.Timestamptz
+  cancelReason   String?           @map("cancel_reason")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization  Organization?  @relation(fields: [organizationId], references: [id])
+  course        Course         @relation(fields: [courseId], references: [id])
+  teacher       Teacher        @relation(fields: [teacherId], references: [id])
+  class         Class?         @relation(fields: [classId], references: [id])
+  room          Room           @relation(fields: [roomId], references: [id])
+  creator       User?          @relation("ScheduleCreator", fields: [createdBy], references: [id])
+  lessonRecords LessonRecord[]
+
+  @@index([organizationId])
+  @@index([lessonDate, teacherId])
+  @@index([lessonDate, roomId])
+  @@index([classId])
+  @@index([status])
+  @@map("schedules")
+}
+
+model ClassEnrollment {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  classId        String   @map("class_id") @db.Uuid
+  studentId      String   @map("student_id") @db.Uuid
+  enrolledAt     DateTime @default(now()) @map("enrolled_at") @db.Timestamptz
+  status         String   @default("active") @db.VarChar(20)
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  class        Class         @relation(fields: [classId], references: [id])
+  student      Student       @relation(fields: [studentId], references: [id])
+
+  @@unique([classId, studentId])
+  @@index([organizationId])
+  @@map("class_enrollments")
+}
+
+model LessonRecord {
+  id                  String               @id @default(uuid()) @db.Uuid
+  organizationId      String?              @map("organization_id") @db.Uuid
+  scheduleId          String?              @map("schedule_id") @db.Uuid
+  classId             String               @map("class_id") @db.Uuid
+  studentId           String               @map("student_id") @db.Uuid
+  teacherId           String               @map("teacher_id") @db.Uuid
+  lessonDate          DateTime             @map("lesson_date") @db.Date
+  topic               String?              @db.VarChar(500)
+  attendance          LessonAttendance     @default(PRESENT)
+  status              LessonStatus         @default(SCHEDULED)
+  feedbackStatus      LessonFeedbackStatus @default(PENDING) @map("feedback_status")
+  creditsConsumed     Decimal              @default(0) @map("credits_consumed") @db.Decimal(6, 2)
+  performance         String?
+  homework            String?
+  aiSummary           String?              @map("ai_summary")
+  needAdvisorFollowUp Boolean?             @map("need_advisor_follow_up")
+  syncToParent        Boolean?             @map("sync_to_parent")
+  deductedAt          DateTime?            @map("deducted_at") @db.Timestamptz
+  deductTransactionId String?              @unique @map("deduct_transaction_id") @db.Uuid
+  homeworkDueAt       DateTime?            @map("homework_due_at") @db.Date
+  homeworkSubmittedAt DateTime?            @map("homework_submitted_at") @db.Date
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization      Organization?      @relation(fields: [organizationId], references: [id])
+  schedule          Schedule?          @relation(fields: [scheduleId], references: [id])
+  class             Class              @relation(fields: [classId], references: [id])
+  student           Student            @relation(fields: [studentId], references: [id])
+  teacher           Teacher            @relation(fields: [teacherId], references: [id])
+  deductTransaction CreditTransaction? @relation("LessonDeductTransaction", fields: [deductTransactionId], references: [id])
+  sourceTransaction CreditTransaction? @relation("CreditTransactionLesson")
+  aiTasks           AiTask[]
+  files             UploadedFile[]
+
+  @@index([organizationId])
+  @@index([studentId, lessonDate])
+  @@index([teacherId, lessonDate])
+  @@index([status])
+  @@index([feedbackStatus])
+  @@map("lesson_records")
+}
+
+model LeaveRecord {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String?            @map("organization_id") @db.Uuid
+  type           LeaveRequestType
+  studentId      String?            @map("student_id") @db.Uuid
+  teacherId      String?            @map("teacher_id") @db.Uuid
+  classId        String             @map("class_id") @db.Uuid
+  originalDate   DateTime           @map("original_date") @db.Date
+  makeupDate     DateTime?          @map("makeup_date") @db.Date
+  reason         String
+  deductCredit   Boolean            @default(false) @map("deduct_credit")
+  status         LeaveRequestStatus @default(PENDING)
+  notifyStatus   String             @default("pending") @map("notify_status") @db.VarChar(20)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  student      Student?      @relation(fields: [studentId], references: [id])
+  teacher      Teacher?      @relation(fields: [teacherId], references: [id])
+  class        Class         @relation(fields: [classId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@index([status])
+  @@map("leave_records")
+}
+
+model LeaveMakeupRequest {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String?   @map("organization_id") @db.Uuid
+  studentId      String?   @map("student_id") @db.Uuid
+  teacherId      String?   @map("teacher_id") @db.Uuid
+  classId        String?   @map("class_id") @db.Uuid
+  type           String    @default("student_leave") @db.VarChar(40)
+  originalDate   DateTime? @map("original_date") @db.Date
+  makeupDate     DateTime? @map("makeup_date") @db.Date
+  reason         String?
+  deductCredit   Boolean   @default(false) @map("deduct_credit")
+  status         String    @default("pending") @db.VarChar(40)
+  notifyStatus   String    @default("pending") @map("notify_status") @db.VarChar(20)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@index([status])
+  @@map("leave_makeup_requests")
+}
+
+model CreditAccount {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  studentId      String   @unique @map("student_id") @db.Uuid
+  balance        Decimal  @default(0) @db.Decimal(10, 2)
+  totalPurchased Decimal  @default(0) @map("total_purchased") @db.Decimal(10, 2)
+  totalConsumed  Decimal  @default(0) @map("total_consumed") @db.Decimal(10, 2)
+  totalGifted    Decimal  @default(0) @map("total_gifted") @db.Decimal(10, 2)
+  version        Int      @default(1)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization?       @relation(fields: [organizationId], references: [id])
+  student      Student             @relation(fields: [studentId], references: [id])
+  transactions CreditTransaction[]
+
+  @@index([organizationId])
+  @@map("credit_accounts")
+}
+
+model CreditTransaction {
+  id              String                  @id @default(uuid()) @db.Uuid
+  organizationId  String?                 @map("organization_id") @db.Uuid
+  accountId       String                  @map("account_id") @db.Uuid
+  studentId       String                  @map("student_id") @db.Uuid
+  courseId        String?                 @map("course_id") @db.Uuid
+  lessonRecordId  String?                 @unique @map("lesson_record_id") @db.Uuid
+  adjustType      CreditAdjustType        @map("adjust_type")
+  creditsDelta    Decimal                 @map("credits_delta") @db.Decimal(10, 2)
+  balanceAfter    Decimal                 @map("balance_after") @db.Decimal(10, 2)
+  amount          Decimal                 @default(0) @db.Decimal(12, 2)
+  status          CreditTransactionStatus @default(PAID)
+  courseName      String?                 @map("course_name") @db.VarChar(200)
+  notes           String?
+  transactionDate DateTime                @default(now()) @map("transaction_date") @db.Date
+  expireDate      DateTime?               @map("expire_date") @db.Date
+  createdBy       String?                 @map("created_by") @db.Uuid
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  account      CreditAccount @relation(fields: [accountId], references: [id])
+  student      Student       @relation(fields: [studentId], references: [id])
+  course       Course?       @relation(fields: [courseId], references: [id])
+  lessonRecord LessonRecord? @relation("CreditTransactionLesson", fields: [lessonRecordId], references: [id])
+  operator     User?         @relation(fields: [createdBy], references: [id])
+  deductFor    LessonRecord? @relation("LessonDeductTransaction")
+
+  @@index([organizationId])
+  @@index([studentId, transactionDate])
+  @@index([accountId])
+  @@index([adjustType])
+  @@map("credit_transactions")
+}
+
+model ParentReport {
+  id               String             @id @default(uuid()) @db.Uuid
+  organizationId   String?            @map("organization_id") @db.Uuid
+  studentId        String             @map("student_id") @db.Uuid
+  advisorId        String?            @map("advisor_id") @db.Uuid
+  periodLabel      String             @map("period_label") @db.VarChar(100)
+  periodStart      DateTime           @map("period_start") @db.Date
+  periodEnd        DateTime           @map("period_end") @db.Date
+  studentName      String             @map("student_name") @db.VarChar(100)
+  grade            String             @db.VarChar(50)
+  coursesSummary   String             @map("courses_summary") @db.VarChar(500)
+  monthlyHours     Decimal            @map("monthly_hours") @db.Decimal(6, 2)
+  attendanceRate   Decimal            @map("attendance_rate") @db.Decimal(5, 2)
+  homeworkRate     Decimal            @map("homework_rate") @db.Decimal(5, 2)
+  scoreImprovement Decimal            @map("score_improvement") @db.Decimal(6, 2)
+  courseRecords    Json               @map("course_records")
+  aiSummary        String?            @map("ai_summary")
+  trendData        Json?              @map("trend_data")
+  radarData        Json?              @map("radar_data")
+  status           ParentReportStatus @default(DRAFT)
+  sentAt           DateTime?          @map("sent_at") @db.Timestamptz
+  sentChannel      String?            @map("sent_channel") @db.VarChar(50)
+  generatedAt      DateTime?          @map("generated_at") @db.Timestamptz
+  createdBy        String?            @map("created_by") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization?  @relation(fields: [organizationId], references: [id])
+  student      Student        @relation(fields: [studentId], references: [id])
+  advisor      User?          @relation(fields: [advisorId], references: [id])
+  aiTasks      AiTask[]
+  files        UploadedFile[]
+
+  @@index([organizationId])
+  @@index([studentId, periodEnd])
+  @@map("parent_reports")
+}
+
+model AiMessage {
+  id               String         @id @default(uuid()) @db.Uuid
+  organizationId   String?        @map("organization_id") @db.Uuid
+  userId           String         @map("user_id") @db.Uuid
+  sessionId        String         @map("session_id") @db.Uuid
+  role             AiMessageRole
+  content          String
+  intent           AiQueryIntent?
+  structuredResult Json?          @map("structured_result")
+  tokenUsage       Int?           @map("token_usage")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId, sessionId, createdAt])
+  @@map("ai_messages")
+}
+
+model AiTask {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String?      @map("organization_id") @db.Uuid
+  taskType       AiTaskType   @map("task_type")
+  status         AiTaskStatus @default(PENDING)
+  userId         String?      @map("user_id") @db.Uuid
+  studentId      String?      @map("student_id") @db.Uuid
+  lessonRecordId String?      @map("lesson_record_id") @db.Uuid
+  parentReportId String?      @map("parent_report_id") @db.Uuid
+  inputPayload   Json?        @map("input_payload")
+  outputPayload  Json?        @map("output_payload")
+  errorMessage   String?      @map("error_message")
+  startedAt      DateTime?    @map("started_at") @db.Timestamptz
+  completedAt    DateTime?    @map("completed_at") @db.Timestamptz
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
+  student      Student?      @relation(fields: [studentId], references: [id])
+  lessonRecord LessonRecord? @relation(fields: [lessonRecordId], references: [id])
+  parentReport ParentReport? @relation(fields: [parentReportId], references: [id])
+
+  @@index([organizationId])
+  @@index([status, taskType])
+  @@index([studentId])
+  @@map("ai_tasks")
+}
+
+model OperationLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  action         String   @db.VarChar(80)
+  resourceType   String   @map("resource_type") @db.VarChar(80)
+  resourceId     String?  @map("resource_id") @db.Uuid
+  detail         Json?
+  ipAddress      String?  @map("ip_address") @db.VarChar(80)
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([resourceType, resourceId])
+  @@map("operation_logs")
+}
+
+model UploadedFile {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  uploadedBy     String?  @map("uploaded_by") @db.Uuid
+  studentId      String?  @map("student_id") @db.Uuid
+  lessonRecordId String?  @map("lesson_record_id") @db.Uuid
+  parentReportId String?  @map("parent_report_id") @db.Uuid
+  category       String   @db.VarChar(50)
+  originalName   String   @map("original_name") @db.VarChar(255)
+  storedName     String   @map("stored_name") @db.VarChar(255)
+  mimeType       String   @map("mime_type") @db.VarChar(120)
+  size           Int
+  url            String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  uploader     User?         @relation(fields: [uploadedBy], references: [id])
+  student      Student?      @relation(fields: [studentId], references: [id])
+  lessonRecord LessonRecord? @relation(fields: [lessonRecordId], references: [id])
+  parentReport ParentReport? @relation(fields: [parentReportId], references: [id])
+
+  @@index([organizationId, category])
+  @@index([studentId])
+  @@map("uploaded_files")
+}
+
+model Order {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  orderNo        String   @map("order_no") @db.VarChar(80)
+  studentId      String?  @map("student_id") @db.Uuid
+  courseId       String?  @map("course_id") @db.Uuid
+  credits        Decimal  @default(0) @db.Decimal(10, 2)
+  amount         Decimal  @default(0) @db.Decimal(12, 2)
+  status         String   @default("paid") @db.VarChar(30)
+  paymentMethod  String?  @map("payment_method") @db.VarChar(50)
+  ownerId        String?  @map("owner_id") @db.Uuid
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  owner        User?         @relation(fields: [ownerId], references: [id])
+
+  @@unique([organizationId, orderNo])
+  @@index([organizationId])
+  @@index([studentId])
+  @@map("orders")
+}
+
+model Homework {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String?   @map("organization_id") @db.Uuid
+  lessonRecordId String?   @map("lesson_record_id") @db.Uuid
+  studentId      String?   @map("student_id") @db.Uuid
+  teacherId      String?   @map("teacher_id") @db.Uuid
+  title          String    @db.VarChar(200)
+  description    String?
+  dueDate        DateTime? @map("due_date") @db.Date
+  submittedAt    DateTime? @map("submitted_at") @db.Timestamptz
+  status         String    @default("pending") @db.VarChar(30)
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  creator      User?         @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@map("homework")
+}
+
+model Assessment {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  studentId      String?  @map("student_id") @db.Uuid
+  courseId       String?  @map("course_id") @db.Uuid
+  teacherId      String?  @map("teacher_id") @db.Uuid
+  title          String   @db.VarChar(200)
+  assessmentDate DateTime @default(now()) @map("assessment_date") @db.Date
+  score          Decimal? @db.Decimal(6, 2)
+  fullScore      Decimal? @map("full_score") @db.Decimal(6, 2)
+  comment        String?
+  createdBy      String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  creator      User?         @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@map("assessments")
+}
+
+model CompetitionProject {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(200)
+  category       String   @db.VarChar(80)
+  studentId      String?  @map("student_id") @db.Uuid
+  advisorId      String?  @map("advisor_id") @db.Uuid
+  stage          String   @default("planning") @db.VarChar(50)
+  award          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  advisor      User?         @relation(fields: [advisorId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@map("competition_projects")
+}
+
+model ImportLog {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  importType     String    @map("import_type") @db.VarChar(50)
+  fileName       String?   @map("file_name") @db.VarChar(255)
+  totalRows      Int       @default(0) @map("total_rows")
+  successRows    Int       @default(0) @map("success_rows")
+  failedRows     Int       @default(0) @map("failed_rows")
+  status         String    @default("previewed") @db.VarChar(30)
+  result         Json?
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  importedAt     DateTime? @map("imported_at") @db.Timestamptz
+  rolledBackAt   DateTime? @map("rolled_back_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([importType, status])
+  @@map("import_logs")
+}

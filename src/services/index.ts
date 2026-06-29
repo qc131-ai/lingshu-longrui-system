@@ -1,0 +1,15 @@
+export { USE_MOCK, API_BASE_URL } from "./config";
+export { studentService } from "./studentService";
+export type { CreateStudentInput } from "./studentService";
+export { courseService } from "./courseService";
+export { teacherService } from "./teacherService";
+export { scheduleService } from "./scheduleService";
+export type { CreateScheduleInput } from "./scheduleService";
+export { lessonService } from "./lessonService";
+export type { ConfirmDeductInput, ConfirmDeductResult } from "./lessonService";
+export { creditService } from "./creditService";
+export type { AdjustCreditsInput, AdjustCreditsResult } from "./creditService";
+export { reportService } from "./reportService";
+export { aiService } from "./aiService";
+export { competitionService } from "./competitionService";
+export { getInitialAppStateSync, loadAppState } from "./bootstrap";

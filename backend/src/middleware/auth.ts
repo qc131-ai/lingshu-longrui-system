@@ -1,0 +1,62 @@
+import type { NextFunction, Request, Response } from "express";
+import { UserRole } from "@prisma/client";
+import { AppError } from "../lib/errors.js";
+import { verifyToken } from "../lib/token.js";
+
+export type MockUser = {
+  id: string;
+  organizationId: string;
+  role: "admin" | "academic_manager" | "advisor" | "teacher" | "finance";
+  displayName: string;
+};
+
+declare global {
+  namespace Express {
+    interface Request {
+      user: MockUser;
+    }
+  }
+}
+
+const roleMap: Record<UserRole, MockUser["role"]> = {
+  ADMIN: "admin",
+  ACADEMIC_MANAGER: "academic_manager",
+  ADVISOR: "advisor",
+  TEACHER: "teacher",
+  FINANCE: "finance",
+};
+
+export function mockAuth(req: Request, _res: Response, next: NextFunction) {
+  const token = req.header("authorization")?.replace(/^Bearer\s+/i, "");
+  const payload = token ? verifyToken(token) : null;
+  if (payload) {
+    req.user = {
+      id: payload.userId,
+      organizationId: payload.organizationId,
+      role: payload.role as MockUser["role"],
+      displayName: payload.displayName,
+    };
+    return next();
+  }
+
+  req.user = {
+    id: req.header("x-user-id") || "00000000-0000-0000-0000-000000000001",
+    organizationId: req.header("x-organization-id") || "01000000-0000-0000-0000-000000000001",
+    role: (req.header("x-user-role") as MockUser["role"]) || "admin",
+    displayName: req.header("x-user-name") || "Mock Admin",
+  };
+  next();
+}
+
+export function requireRoles(...roles: MockUser["role"][]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!roles.includes(req.user.role)) {
+      return next(new AppError(403, "FORBIDDEN", "当前账号无权执行该操作"));
+    }
+    return next();
+  };
+}
+
+export function toApiRole(role: UserRole) {
+  return roleMap[role];
+}

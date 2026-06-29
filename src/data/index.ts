@@ -1,0 +1,35 @@
+export { students } from "./students";
+export { courses } from "./courses";
+export { classes } from "./classes";
+export { teachers } from "./teachers";
+export { lessonRecords } from "./lessonRecords";
+export { leaveRecords } from "./leaveRecords";
+export { assessments } from "./assessments";
+export { competitions } from "./competitions";
+export { creditTransactions } from "./creditTransactions";
+export { scheduleEvents } from "./schedule";
+export { dashboardChartData, dashboardTasks } from "./dashboard";
+export { reportTrendData, reportRadarData } from "./reports";
+export { aiChatHistory, makeupReminderItems } from "./ai";
+export { assessmentChartData } from "./assessmentChart";
+export { availableStudentTags, gradeOptions, studentDetailDefaults } from "./studentMeta";
+export { defaultParentReport, parentReportSummaryTemplate } from "./parentReport";
+export { creditLedgerSummary, ordersPageStats, defaultRenewalSuggestion } from "./creditMeta";
+export { assessmentTabs, assessmentWeakPointTags } from "./assessmentsMeta";
+export { recordsPageStats, leavesPageStats, competitionsPageStats, financePageStats, scheduleTeacherOptions, scheduleRoomOptions, dashboardKpiStats } from "./pageStats";
+
+// 向后兼容旧命名
+export { students as mockStudents } from "./students";
+export { courses as mockCourses } from "./courses";
+export { classes as mockClasses } from "./classes";
+export { teachers as mockTeachers } from "./teachers";
+export { lessonRecords as mockLessonRecords } from "./lessonRecords";
+export { leaveRecords as mockLeaveRecords } from "./leaveRecords";
+export { assessments as mockAssessments } from "./assessments";
+export { competitions as mockCompetitions } from "./competitions";
+export { creditTransactions as mockOrders } from "./creditTransactions";
+export { scheduleEvents as mockScheduleEvents } from "./schedule";
+export { dashboardChartData as mockDashboardChartData, dashboardTasks as mockDashboardTasks } from "./dashboard";
+export { reportTrendData as mockReportTrendData, reportRadarData as mockReportRadarData } from "./reports";
+export { aiChatHistory as mockAIChatHistory } from "./ai";
+export { assessmentChartData as mockAssessmentChartData } from "./assessmentChart";
