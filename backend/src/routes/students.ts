@@ -15,7 +15,7 @@ import { studentScope } from "../lib/accessScope.js";
 export const studentsRouter = Router();
 
 const studentInclude = {
-  creditAccount: true,
+  creditAccounts: true,
   advisor: { select: { displayName: true } },
 } as const;
 
@@ -133,17 +133,18 @@ studentsRouter.put(
   asyncHandler(async (req, res) => {
     const input = req.body;
     if (!isDatabaseId(req.params.id)) throw notFound("Student");
-    const existing = await prisma.student.findFirst({
+      const existing = await prisma.student.findFirst({
       where: { id: req.params.id, organizationId: req.user.organizationId, ...studentScope(req.user) },
-      include: { creditAccount: true },
+      include: { creditAccounts: true },
     });
     if (!existing || existing.deletedAt) throw notFound("Student");
 
     const updated = await prisma.$transaction(async (tx) => {
       if (input.remainingCredits !== undefined) {
-        if (!existing.creditAccount) throw badRequest("Student credit account is missing");
+        const account = existing.creditAccounts[0];
+        if (!account) throw badRequest("Student credit account is missing");
         await tx.creditAccount.update({
-          where: { id: existing.creditAccount.id },
+          where: { id: account.id },
           data: { balance: Number(input.remainingCredits), version: { increment: 1 } },
         });
       }

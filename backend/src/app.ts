@@ -8,6 +8,7 @@ import { coursesRouter } from "./routes/courses.js";
 import { creditsRouter } from "./routes/credits.js";
 import { filesRouter } from "./routes/files.js";
 import { importsRouter } from "./routes/imports.js";
+import { leaveMakeupRouter } from "./routes/leaveMakeup.js";
 import { leavesRouter } from "./routes/leaves.js";
 import { lessonRecordsRouter } from "./routes/lessonRecords.js";
 import { reportsRouter } from "./routes/reports.js";
@@ -36,6 +37,7 @@ export function createApp() {
   app.use("/api/teachers", teachersRouter);
   app.use("/api/schedules", schedulesRouter);
   app.use("/api/lesson-records", lessonRecordsRouter);
+  app.use("/api/leave-makeup", leaveMakeupRouter);
   app.use("/api/leaves", leavesRouter);
   app.use("/api/credits", creditsRouter);
   app.use("/api/reports", reportsRouter);

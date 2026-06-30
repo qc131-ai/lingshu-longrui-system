@@ -1,8 +1,8 @@
-import type { Schedule } from "../types";
+import type { Schedule, ScheduleStatus } from "../types/schedule";
 import { scheduleEvents as seedEvents } from "../data/schedule";
 import { scheduleRoomOptions, scheduleTeacherOptions } from "../data/pageStats";
 import { generateId } from "./config";
-import { apiClient, createApiCallState } from "./apiClient";
+import { ApiClientError, apiClient, createApiCallState, setApiError, setApiLoading, setApiSuccess } from "./apiClient";
 
 export type CreateScheduleInput = {
   studentId?: string;
@@ -11,7 +11,7 @@ export type CreateScheduleInput = {
   courseName: string;
   teacherId?: string;
   teacher: string;
-  roomId: string;
+  roomId?: string;
   classroom?: string;
   date: string;
   startTime: string;
@@ -19,7 +19,21 @@ export type CreateScheduleInput = {
   duration: number;
   consumedHours?: number;
   lessonType?: "class" | "exam" | "meeting";
-  status?: "scheduled" | "completed" | "cancelled";
+  status?: ScheduleStatus;
+  notes?: string;
+};
+
+export type UpdateScheduleInput = {
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  duration?: number;
+  teacherId?: string;
+  roomId?: string;
+  classroom?: string;
+  status?: ScheduleStatus;
+  cancelReason?: string;
+  notes?: string;
 };
 
 export type ListScheduleFilters = {
@@ -31,7 +45,7 @@ export type ListScheduleFilters = {
   studentId?: string | null;
   classId?: string | null;
   courseId?: string | null;
-  status?: "scheduled" | "completed" | "cancelled" | "" | null;
+  status?: ScheduleStatus | "" | null;
 };
 
 export const scheduleApiState = {
@@ -40,7 +54,12 @@ export const scheduleApiState = {
   update: createApiCallState<Schedule>(),
 };
 
-function resolveRoomLabel(roomId: string): string {
+function isUuid(value: string | undefined): value is string {
+  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function resolveRoomLabel(roomId: string | undefined): string {
+  if (!roomId) return "";
   return scheduleRoomOptions.find((r) => r.id === roomId)?.label ?? roomId;
 }
 
@@ -71,6 +90,7 @@ function toTimeText(startTime: string, duration: number) {
 }
 
 function toCreateSchedulePayload(input: CreateScheduleInput) {
+  const classroom = input.classroom ?? resolveRoomLabel(input.roomId);
   return {
     studentId: input.studentId,
     classId: input.classId,
@@ -78,8 +98,8 @@ function toCreateSchedulePayload(input: CreateScheduleInput) {
     courseName: input.courseName,
     teacherId: input.teacherId,
     teacher: input.teacher,
-    roomId: input.roomId,
-    classroom: input.classroom ?? resolveRoomLabel(input.roomId),
+    roomId: isUuid(input.roomId) ? input.roomId : undefined,
+    classroom,
     date: input.date,
     startTime: input.startTime,
     endTime: input.endTime ?? toTimeText(input.startTime, input.duration),
@@ -107,6 +127,18 @@ function appendQueryParam(params: URLSearchParams, key: string, value: string | 
   params.set(key, value);
 }
 
+function shouldUseMockFallback(error: unknown) {
+  return !(error instanceof ApiClientError);
+}
+
+function formatApiError(error: unknown, fallback: string) {
+  if (error instanceof ApiClientError) {
+    const endpoint = `${error.method ?? "GET"} ${error.url ?? ""}`.trim();
+    return `${endpoint}：${error.message}`;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 function buildScheduleQuery(filters: ListScheduleFilters = {}) {
   const params = new URLSearchParams();
   appendQueryParam(params, "startDate", toDateQueryValue(filters.startDate ?? filters.weekStart));
@@ -131,13 +163,18 @@ function detectConflict(newEvent: Schedule, existing: Schedule[]): boolean {
 
 export const scheduleService = {
   async listEvents(filters: ListScheduleFilters = {}): Promise<Schedule[]> {
-    return apiClient.requestWithFallback<Schedule[]>(
-      `/schedules${buildScheduleQuery(filters)}`,
-      { method: "GET" },
-      () => [...seedEvents],
-      scheduleApiState.list,
-      "排课列表查询失败"
-    );
+    const path = `/schedules${buildScheduleQuery(filters)}`;
+    setApiLoading(scheduleApiState.list);
+    try {
+      const data = await apiClient.request<Schedule[]>(path, { method: "GET" });
+      setApiSuccess(scheduleApiState.list, data);
+      return data;
+    } catch (error) {
+      const message = formatApiError(error, "排课列表查询失败");
+      setApiError(scheduleApiState.list, message);
+      if (shouldUseMockFallback(error)) return [...seedEvents];
+      throw new Error(message);
+    }
   },
 
   /** 新建排课 */
@@ -145,39 +182,66 @@ export const scheduleService = {
     event: Schedule;
     hasConflict: boolean;
   }> {
-    return apiClient.requestWithFallback<{ event: Schedule; hasConflict: boolean }>(
-      "/schedules",
-      { method: "POST", body: JSON.stringify(toCreateSchedulePayload(input)) },
-      () => {
-      const event = buildScheduleEvent(input);
-      const hasConflict = detectConflict(event, existingEvents);
-      return { event, hasConflict };
-      },
-      scheduleApiState.create,
-      "排课创建失败"
-    );
+    setApiLoading(scheduleApiState.create);
+    try {
+      const data = await apiClient.request<{ event: Schedule; hasConflict: boolean }>(
+        "/schedules",
+        { method: "POST", body: JSON.stringify(toCreateSchedulePayload(input)) }
+      );
+      setApiSuccess(scheduleApiState.create, data);
+      return data;
+    } catch (error) {
+      const message = formatApiError(error, "排课创建失败");
+      setApiError(scheduleApiState.create, message);
+      if (shouldUseMockFallback(error)) {
+        const event = buildScheduleEvent(input);
+        const hasConflict = detectConflict(event, existingEvents);
+        return { event, hasConflict };
+      }
+      throw new Error(message);
+    }
+  },
+
+  async updateSchedule(eventId: string, input: UpdateScheduleInput): Promise<Schedule> {
+    setApiLoading(scheduleApiState.update);
+    try {
+      const payload = {
+        ...input,
+        roomId: isUuid(input.roomId) ? input.roomId : undefined,
+        classroom: input.classroom ?? resolveRoomLabel(input.roomId),
+      };
+      const data = await apiClient.request<Schedule>(
+        `/schedules/${eventId}`,
+        { method: "PUT", body: JSON.stringify(payload) }
+      );
+      setApiSuccess(scheduleApiState.update, data);
+      return data;
+    } catch (error) {
+      const message = formatApiError(error, "排课更新失败");
+      setApiError(scheduleApiState.update, message);
+      throw new Error(message);
+    }
+  },
+
+  async updateScheduleStatus(eventId: string, input: { status: ScheduleStatus; cancelReason?: string; notes?: string }): Promise<Schedule> {
+    setApiLoading(scheduleApiState.update);
+    try {
+      const data = await apiClient.request<Schedule>(
+        `/schedules/${eventId}/status`,
+        { method: "PATCH", body: JSON.stringify(input) }
+      );
+      setApiSuccess(scheduleApiState.update, data);
+      return data;
+    } catch (error) {
+      const message = formatApiError(error, "排课状态更新失败");
+      setApiError(scheduleApiState.update, message);
+      throw new Error(message);
+    }
   },
 
   /** 取消排课 */
-  async cancelSchedule(eventId: string, existingEvents: Schedule[]): Promise<Schedule[]> {
-    await apiClient.requestWithFallback<Schedule>(
-      `/schedules/${eventId}`,
-      { method: "PUT", body: JSON.stringify({ status: "cancelled" }) },
-      () => existingEvents.find((e) => e.id === eventId) ?? buildScheduleEvent({
-        courseName: "已取消排课",
-        teacher: "",
-        roomId: "room-1",
-        date: new Date().toISOString().slice(0, 10),
-        startTime: "10:00",
-        duration: 1,
-      }),
-      scheduleApiState.update,
-      "排课更新失败"
-    );
-    if (scheduleApiState.update.status === "error") {
-      return existingEvents.filter((e) => e.id !== eventId);
-    }
-    return this.listEvents();
+  async cancelSchedule(eventId: string, cancelReason: string): Promise<Schedule> {
+    return this.updateScheduleStatus(eventId, { status: "cancelled", cancelReason });
   },
 
   async getTeacherOptions() {

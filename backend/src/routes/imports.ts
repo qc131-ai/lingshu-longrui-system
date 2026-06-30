@@ -251,7 +251,7 @@ async function commitRows(type: ImportType, organizationId: string, userId: stri
           targetDirection: data.targetDirection,
           notes: data.notes,
           advisorId: advisor?.id,
-          creditAccount: { create: { organizationId, balance: 0, totalPurchased: 0 } },
+          creditAccounts: { create: { organizationId, balance: 0, totalPurchased: 0 } },
         },
       });
       createdIds.push({ type: "student", id: student.id });
@@ -284,11 +284,12 @@ async function commitRows(type: ImportType, organizationId: string, userId: stri
       });
       createdIds.push({ type: "teacher", id: teacher.id });
     } else if (type === "credits" || type === "orders") {
-      const student = await prisma.student.findFirst({ where: { phone: data.phone, organizationId }, include: { creditAccount: true } });
-      if (!student?.creditAccount) continue;
+      const student = await prisma.student.findFirst({ where: { phone: data.phone, organizationId }, include: { creditAccounts: true } });
+      const studentAccount = student?.creditAccounts[0];
+      if (!studentAccount) continue;
       const amount = type === "credits" ? Number(data.balance) : Number(data.credits);
       const account = await prisma.creditAccount.update({
-        where: { id: student.creditAccount.id },
+        where: { id: studentAccount.id },
         data: {
           balance: type === "credits" ? Number(data.balance) : { increment: amount },
           totalPurchased: { increment: amount },
@@ -342,7 +343,7 @@ async function commitRows(type: ImportType, organizationId: string, userId: stri
       createdIds.push({ type: "schedule", id: schedule.id });
     } else if (type === "lesson-records") {
       const [student, classRecord, teacher] = await Promise.all([
-        prisma.student.findFirst({ where: { organizationId, phone: data.phone }, include: { creditAccount: true } }),
+        prisma.student.findFirst({ where: { organizationId, phone: data.phone }, include: { creditAccounts: true } }),
         prisma.class.findFirst({ where: { organizationId, name: data.className } }),
         prisma.teacher.findFirst({ where: { organizationId, name: data.teacherName } }),
       ]);

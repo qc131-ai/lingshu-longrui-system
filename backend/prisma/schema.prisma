@@ -53,9 +53,13 @@ enum TeacherType {
 }
 
 enum ScheduleStatus {
-  SCHEDULED @map("scheduled")
-  COMPLETED @map("completed")
-  CANCELLED @map("cancelled")
+  SCHEDULED      @map("scheduled")
+  IN_PROGRESS    @map("in_progress")
+  COMPLETED      @map("completed")
+  CANCELLED      @map("cancelled")
+  STUDENT_LEAVE  @map("student_leave")
+  TEACHER_LEAVE  @map("teacher_leave")
+  MAKEUP_PENDING @map("makeup_pending")
 }
 
 enum ScheduleEventType {
@@ -72,10 +76,13 @@ enum LessonAttendance {
 }
 
 enum LessonStatus {
-  SCHEDULED   @map("scheduled")
-  COMPLETED   @map("completed")
-  CANCELLED   @map("cancelled")
-  NEED_MAKEUP @map("need_makeup")
+  DRAFT            @map("draft")
+  PENDING_FEEDBACK @map("pending_feedback")
+  SUBMITTED        @map("submitted")
+  SCHEDULED        @map("scheduled")
+  COMPLETED        @map("completed")
+  CANCELLED        @map("cancelled")
+  NEED_MAKEUP      @map("need_makeup")
 }
 
 enum LessonFeedbackStatus {
@@ -83,11 +90,17 @@ enum LessonFeedbackStatus {
   SUBMITTED @map("submitted")
 }
 
+enum LessonDeductionStatus {
+  PENDING  @map("pending")
+  DEDUCTED @map("deducted")
+}
+
 enum LeaveRequestType {
   STUDENT_LEAVE @map("student_leave")
   TEACHER_LEAVE @map("teacher_leave")
   RESCHEDULE    @map("reschedule")
   CANCEL        @map("cancel")
+  CANCELLATION  @map("cancellation")
   MAKEUP        @map("makeup")
 }
 
@@ -95,8 +108,12 @@ enum LeaveRequestStatus {
   PENDING          @map("pending")
   APPROVED         @map("approved")
   REJECTED         @map("rejected")
+  MAKEUP_PENDING   @map("makeup_pending")
   MAKEUP_SCHEDULED @map("makeup_scheduled")
   MAKEUP_COMPLETED @map("makeup_completed")
+  COMPLETED        @map("completed")
+  PARENT_NOTIFIED  @map("parent_notified")
+  CANCELLED        @map("cancelled")
 }
 
 enum CreditAdjustType {
@@ -109,6 +126,7 @@ enum CreditAdjustType {
   TRANSFER_OUT  @map("transfer_out")
   MANUAL        @map("manual")
   LESSON_DEDUCT @map("lesson_deduct")
+  LEAVE_DEDUCTION @map("leave_deduction")
 }
 
 enum CreditTransactionStatus {
@@ -120,7 +138,16 @@ enum CreditTransactionStatus {
 enum ParentReportStatus {
   DRAFT     @map("draft")
   GENERATED @map("generated")
+  REVIEWED  @map("reviewed")
   SENT      @map("sent")
+  ARCHIVED  @map("archived")
+}
+
+enum ParentReportType {
+  WEEKLY  @map("weekly")
+  MONTHLY @map("monthly")
+  STAGE   @map("stage")
+  CUSTOM  @map("custom")
 }
 
 enum AiMessageRole {
@@ -206,8 +233,12 @@ model User {
   advisorStudents     Student[]            @relation("StudentAdvisor")
   teacherProfile      Teacher?
   createdSchedules    Schedule[]           @relation("ScheduleCreator")
+  createdLeaveMakeupRequests LeaveMakeupRequest[] @relation("LeaveMakeupCreator")
+  approvedLeaveMakeupRequests LeaveMakeupRequest[] @relation("LeaveMakeupApprover")
   creditActions       CreditTransaction[]
-  parentReports       ParentReport[]
+  parentReports       ParentReport[]       @relation("ParentReportAdvisor")
+  createdParentReports ParentReport[]      @relation("ParentReportCreator")
+  sentParentReports    ParentReport[]      @relation("ParentReportSender")
   aiMessages          AiMessage[]
   aiTasks             AiTask[]
   operationLogs       OperationLog[]
@@ -308,9 +339,11 @@ model Student {
   organization       Organization?       @relation(fields: [organizationId], references: [id])
   advisor            User?               @relation("StudentAdvisor", fields: [advisorId], references: [id])
   enrollments        ClassEnrollment[]
+  schedules          Schedule[]
   lessonRecords      LessonRecord[]
   leaveRecords       LeaveRecord[]
-  creditAccount      CreditAccount?
+  leaveMakeupRequests LeaveMakeupRequest[]
+  creditAccounts     CreditAccount[]
   creditTransactions CreditTransaction[]
   parentReports      ParentReport[]
   aiTasks            AiTask[]
@@ -343,7 +376,11 @@ model Course {
   organization       Organization?       @relation(fields: [organizationId], references: [id])
   classes            Class[]
   schedules          Schedule[]
+  lessonRecords      LessonRecord[]
+  leaveMakeupRequests LeaveMakeupRequest[]
+  creditAccounts     CreditAccount[]
   creditTransactions CreditTransaction[]
+  parentReports       ParentReport[]
 
   @@index([organizationId])
   @@index([responsibleTeacherId])
@@ -371,6 +408,7 @@ model Class {
   schedules     Schedule[]
   lessonRecords LessonRecord[]
   leaveRecords  LeaveRecord[]
+  leaveMakeupRequests LeaveMakeupRequest[]
 
   @@index([organizationId])
   @@index([courseId])
@@ -399,6 +437,7 @@ model Teacher {
   schedules     Schedule[]
   lessonRecords LessonRecord[]
   leaveRecords  LeaveRecord[]
+  leaveMakeupRequests LeaveMakeupRequest[]
 
   @@index([organizationId])
   @@map("teachers")
@@ -425,7 +464,9 @@ model Schedule {
   courseId       String            @map("course_id") @db.Uuid
   teacherId      String            @map("teacher_id") @db.Uuid
   classId        String?           @map("class_id") @db.Uuid
-  roomId         String            @map("room_id") @db.Uuid
+  studentId      String?           @map("student_id") @db.Uuid
+  roomId         String?           @map("room_id") @db.Uuid
+  classroom      String?           @db.VarChar(100)
   title          String            @db.VarChar(200)
   eventType      ScheduleEventType @default(CLASS) @map("event_type")
   lessonDate     DateTime          @map("lesson_date") @db.Date
@@ -434,6 +475,7 @@ model Schedule {
   endTime        DateTime          @map("end_time") @db.Time
   status         ScheduleStatus    @default(SCHEDULED)
   hasConflict    Boolean?          @map("has_conflict")
+  notes          String?
   createdBy      String?           @map("created_by") @db.Uuid
   cancelledAt    DateTime?         @map("cancelled_at") @db.Timestamptz
   cancelReason   String?           @map("cancel_reason")
@@ -444,14 +486,18 @@ model Schedule {
   course        Course         @relation(fields: [courseId], references: [id])
   teacher       Teacher        @relation(fields: [teacherId], references: [id])
   class         Class?         @relation(fields: [classId], references: [id])
-  room          Room           @relation(fields: [roomId], references: [id])
+  student       Student?       @relation(fields: [studentId], references: [id])
+  room          Room?          @relation(fields: [roomId], references: [id])
   creator       User?          @relation("ScheduleCreator", fields: [createdBy], references: [id])
   lessonRecords LessonRecord[]
+  leaveMakeupRequests LeaveMakeupRequest[] @relation("LeaveMakeupOriginalSchedule")
+  makeupForRequests   LeaveMakeupRequest[] @relation("LeaveMakeupMakeupSchedule")
 
   @@index([organizationId])
   @@index([lessonDate, teacherId])
   @@index([lessonDate, roomId])
   @@index([classId])
+  @@index([studentId])
   @@index([status])
   @@map("schedules")
 }
@@ -477,18 +523,27 @@ model LessonRecord {
   id                  String               @id @default(uuid()) @db.Uuid
   organizationId      String?              @map("organization_id") @db.Uuid
   scheduleId          String?              @map("schedule_id") @db.Uuid
-  classId             String               @map("class_id") @db.Uuid
-  studentId           String               @map("student_id") @db.Uuid
+  courseId            String?              @map("course_id") @db.Uuid
+  classId             String?              @map("class_id") @db.Uuid
+  studentId           String?              @map("student_id") @db.Uuid
   teacherId           String               @map("teacher_id") @db.Uuid
   lessonDate          DateTime             @map("lesson_date") @db.Date
+  startTime           DateTime?            @map("start_time") @db.Time
+  endTime             DateTime?            @map("end_time") @db.Time
+  classroom           String?              @db.VarChar(100)
+  durationHours       Decimal              @default(0) @map("duration_hours") @db.Decimal(4, 2)
   topic               String?              @db.VarChar(500)
   attendance          LessonAttendance     @default(PRESENT)
-  status              LessonStatus         @default(SCHEDULED)
+  status              LessonStatus         @default(DRAFT)
   feedbackStatus      LessonFeedbackStatus @default(PENDING) @map("feedback_status")
   creditsConsumed     Decimal              @default(0) @map("credits_consumed") @db.Decimal(6, 2)
   performance         String?
+  knowledgeMastery    String?              @map("knowledge_mastery")
   homework            String?
+  nextPlan            String?              @map("next_plan")
+  internalNotes       String?              @map("internal_notes")
   aiSummary           String?              @map("ai_summary")
+  deductionStatus     LessonDeductionStatus @default(PENDING) @map("deduction_status")
   needAdvisorFollowUp Boolean?             @map("need_advisor_follow_up")
   syncToParent        Boolean?             @map("sync_to_parent")
   deductedAt          DateTime?            @map("deducted_at") @db.Timestamptz
@@ -500,17 +555,22 @@ model LessonRecord {
 
   organization      Organization?      @relation(fields: [organizationId], references: [id])
   schedule          Schedule?          @relation(fields: [scheduleId], references: [id])
-  class             Class              @relation(fields: [classId], references: [id])
-  student           Student            @relation(fields: [studentId], references: [id])
+  course            Course?            @relation(fields: [courseId], references: [id])
+  class             Class?             @relation(fields: [classId], references: [id])
+  student           Student?           @relation(fields: [studentId], references: [id])
   teacher           Teacher            @relation(fields: [teacherId], references: [id])
   deductTransaction CreditTransaction? @relation("LessonDeductTransaction", fields: [deductTransactionId], references: [id])
   sourceTransaction CreditTransaction? @relation("CreditTransactionLesson")
+  leaveMakeupRequests LeaveMakeupRequest[]
   aiTasks           AiTask[]
   files             UploadedFile[]
 
   @@index([organizationId])
+  @@index([scheduleId])
   @@index([studentId, lessonDate])
   @@index([teacherId, lessonDate])
+  @@index([classId])
+  @@index([courseId])
   @@index([status])
   @@index([feedbackStatus])
   @@map("lesson_records")
@@ -544,25 +604,54 @@ model LeaveRecord {
 }
 
 model LeaveMakeupRequest {
-  id             String    @id @default(uuid()) @db.Uuid
-  organizationId String?   @map("organization_id") @db.Uuid
-  studentId      String?   @map("student_id") @db.Uuid
-  teacherId      String?   @map("teacher_id") @db.Uuid
-  classId        String?   @map("class_id") @db.Uuid
-  type           String    @default("student_leave") @db.VarChar(40)
-  originalDate   DateTime? @map("original_date") @db.Date
-  makeupDate     DateTime? @map("makeup_date") @db.Date
-  reason         String?
-  deductCredit   Boolean   @default(false) @map("deduct_credit")
-  status         String    @default("pending") @db.VarChar(40)
-  notifyStatus   String    @default("pending") @map("notify_status") @db.VarChar(20)
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String?            @map("organization_id") @db.Uuid
+  scheduleId        String             @map("schedule_id") @db.Uuid
+  lessonRecordId    String?            @map("lesson_record_id") @db.Uuid
+  studentId         String?            @map("student_id") @db.Uuid
+  classId           String?            @map("class_id") @db.Uuid
+  courseId          String             @map("course_id") @db.Uuid
+  teacherId         String             @map("teacher_id") @db.Uuid
+  requestType       LeaveRequestType   @default(STUDENT_LEAVE) @map("request_type")
+  originalDate      DateTime           @map("original_date") @db.Date
+  originalStartTime DateTime           @map("original_start_time") @db.Time
+  originalEndTime   DateTime           @map("original_end_time") @db.Time
+  newDate           DateTime?          @map("new_date") @db.Date
+  newStartTime      DateTime?          @map("new_start_time") @db.Time
+  newEndTime        DateTime?          @map("new_end_time") @db.Time
+  reason            String
+  deductCredit      Boolean            @default(false) @map("deduct_credit")
+  needMakeup        Boolean            @default(true) @map("need_makeup")
+  status            LeaveRequestStatus @default(PENDING)
+  approvalNote      String?            @map("approval_note")
+  rejectReason      String?            @map("reject_reason")
+  parentNotified    Boolean            @default(false) @map("parent_notified")
+  makeupScheduleId  String?            @map("makeup_schedule_id") @db.Uuid
+  createdBy         String?            @map("created_by") @db.Uuid
+  approvedBy        String?            @map("approved_by") @db.Uuid
+  approvedAt        DateTime?          @map("approved_at") @db.Timestamptz
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization Organization? @relation(fields: [organizationId], references: [id])
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  schedule       Schedule      @relation("LeaveMakeupOriginalSchedule", fields: [scheduleId], references: [id])
+  lessonRecord   LessonRecord? @relation(fields: [lessonRecordId], references: [id])
+  student        Student?      @relation(fields: [studentId], references: [id])
+  class          Class?        @relation(fields: [classId], references: [id])
+  course         Course        @relation(fields: [courseId], references: [id])
+  teacher        Teacher       @relation(fields: [teacherId], references: [id])
+  makeupSchedule Schedule?     @relation("LeaveMakeupMakeupSchedule", fields: [makeupScheduleId], references: [id])
+  creator        User?         @relation("LeaveMakeupCreator", fields: [createdBy], references: [id])
+  approver       User?         @relation("LeaveMakeupApprover", fields: [approvedBy], references: [id])
 
   @@index([organizationId])
+  @@index([scheduleId])
+  @@index([lessonRecordId])
   @@index([studentId])
+  @@index([classId])
+  @@index([courseId])
+  @@index([teacherId])
+  @@index([requestType])
   @@index([status])
   @@map("leave_makeup_requests")
 }
@@ -570,19 +659,28 @@ model LeaveMakeupRequest {
 model CreditAccount {
   id             String   @id @default(uuid()) @db.Uuid
   organizationId String?  @map("organization_id") @db.Uuid
-  studentId      String   @unique @map("student_id") @db.Uuid
+  studentId      String   @map("student_id") @db.Uuid
+  courseId       String?  @map("course_id") @db.Uuid
   balance        Decimal  @default(0) @db.Decimal(10, 2)
   totalPurchased Decimal  @default(0) @map("total_purchased") @db.Decimal(10, 2)
   totalConsumed  Decimal  @default(0) @map("total_consumed") @db.Decimal(10, 2)
   totalGifted    Decimal  @default(0) @map("total_gifted") @db.Decimal(10, 2)
+  frozenHours    Decimal  @default(0) @map("frozen_hours") @db.Decimal(10, 2)
+  lowBalance     Boolean  @default(false) @map("low_balance")
+  status         String   @default("active") @db.VarChar(20)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
   version        Int      @default(1)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   organization Organization?       @relation(fields: [organizationId], references: [id])
   student      Student             @relation(fields: [studentId], references: [id])
+  course       Course?             @relation(fields: [courseId], references: [id])
   transactions CreditTransaction[]
 
   @@index([organizationId])
+  @@index([studentId])
+  @@index([courseId])
+  @@unique([studentId, courseId])
   @@map("credit_accounts")
 }
 
@@ -595,6 +693,7 @@ model CreditTransaction {
   lessonRecordId  String?                 @unique @map("lesson_record_id") @db.Uuid
   adjustType      CreditAdjustType        @map("adjust_type")
   creditsDelta    Decimal                 @map("credits_delta") @db.Decimal(10, 2)
+  balanceBefore   Decimal                 @default(0) @map("balance_before") @db.Decimal(10, 2)
   balanceAfter    Decimal                 @map("balance_after") @db.Decimal(10, 2)
   amount          Decimal                 @default(0) @db.Decimal(12, 2)
   status          CreditTransactionStatus @default(PAID)
@@ -624,7 +723,22 @@ model ParentReport {
   id               String             @id @default(uuid()) @db.Uuid
   organizationId   String?            @map("organization_id") @db.Uuid
   studentId        String             @map("student_id") @db.Uuid
+  courseId         String?            @map("course_id") @db.Uuid
   advisorId        String?            @map("advisor_id") @db.Uuid
+  reportType       ParentReportType   @default(MONTHLY) @map("report_type")
+  title            String             @default("学习阶段报告") @db.VarChar(200)
+  summary          String?            @db.Text
+  courseProgress   String?            @map("course_progress") @db.Text
+  lessonSummary    String?            @map("lesson_summary") @db.Text
+  teacherFeedbackSummary String?      @map("teacher_feedback_summary") @db.Text
+  homeworkSummary  String?            @map("homework_summary") @db.Text
+  attendanceSummary String?           @map("attendance_summary") @db.Text
+  creditSummary    String?            @map("credit_summary") @db.Text
+  leaveMakeupSummary String?          @map("leave_makeup_summary") @db.Text
+  weaknessAnalysis String?            @map("weakness_analysis") @db.Text
+  nextStepPlan     String?            @map("next_step_plan") @db.Text
+  internalNotes    String?            @map("internal_notes") @db.Text
+  parentVisibleContent String?        @map("parent_visible_content") @db.Text
   periodLabel      String             @map("period_label") @db.VarChar(100)
   periodStart      DateTime           @map("period_start") @db.Date
   periodEnd        DateTime           @map("period_end") @db.Date
@@ -641,6 +755,7 @@ model ParentReport {
   radarData        Json?              @map("radar_data")
   status           ParentReportStatus @default(DRAFT)
   sentAt           DateTime?          @map("sent_at") @db.Timestamptz
+  sentBy           String?            @map("sent_by") @db.Uuid
   sentChannel      String?            @map("sent_channel") @db.VarChar(50)
   generatedAt      DateTime?          @map("generated_at") @db.Timestamptz
   createdBy        String?            @map("created_by") @db.Uuid
@@ -649,12 +764,19 @@ model ParentReport {
 
   organization Organization?  @relation(fields: [organizationId], references: [id])
   student      Student        @relation(fields: [studentId], references: [id])
-  advisor      User?          @relation(fields: [advisorId], references: [id])
+  course       Course?        @relation(fields: [courseId], references: [id])
+  advisor      User?          @relation("ParentReportAdvisor", fields: [advisorId], references: [id])
+  creator      User?          @relation("ParentReportCreator", fields: [createdBy], references: [id])
+  sender       User?          @relation("ParentReportSender", fields: [sentBy], references: [id])
   aiTasks      AiTask[]
   files        UploadedFile[]
 
   @@index([organizationId])
   @@index([studentId, periodEnd])
+  @@index([courseId])
+  @@index([advisorId])
+  @@index([reportType])
+  @@index([status])
   @@map("parent_reports")
 }
 

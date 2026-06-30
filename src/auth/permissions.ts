@@ -15,7 +15,9 @@ export const permissions: Record<string, UserRole[]> = {
   submitLessonRecord: ["admin", "academic_manager", "teacher"],
   deductCredit: ["admin", "academic_manager", "advisor", "teacher"],
   adjustCredit: ["admin", "academic_manager", "finance"],
-  sendReport: ["admin", "academic_manager", "advisor"],
+  generateReport: ["admin", "academic_manager", "advisor"],
+  editReport: ["admin", "academic_manager", "advisor"],
+  sendReport: ["admin", "academic_manager"],
 };
 
 export function can(role: UserRole | undefined, permission: keyof typeof permissions) {

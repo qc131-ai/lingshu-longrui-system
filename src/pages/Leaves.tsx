@@ -1,23 +1,58 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, Filter, Calendar as CalendarIcon, UserX, CheckCircle2, XCircle, RefreshCw, Bell, Clock, ChevronRight, X } from 'lucide-react';
 import { LeaveRecord } from '../types';
 import { useAppContext } from '../context/AppContext';
-import { lessonService } from '../services/lessonService';
-
-const leavesPageStats = lessonService.getLeavesPageStatsSync();
+import { leaveMakeupService } from '../services/leaveMakeupService';
+import toast from 'react-hot-toast';
 
 export function Leaves() {
-  const { leaveRecords } = useAppContext();
+  const { leaveRecords: initialLeaveRecords, teachers, students } = useAppContext();
+  const [leaveRecords, setLeaveRecords] = useState<LeaveRecord[]>(initialLeaveRecords);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRecord, setSelectedRecord] = useState<LeaveRecord | null>(null);
+  const [filters, setFilters] = useState({ requestType: '', status: '', teacherId: '', studentId: '', startDate: '', endDate: '' });
+  const [isLoading, setIsLoading] = useState(false);
+
+  const leavesPageStats = useMemo(() => ({
+    pendingApproval: leaveRecords.filter(item => item.status === 'pending').length,
+    pendingMakeup: leaveRecords.filter(item => item.status === 'makeup_pending' || item.status === 'approved').length,
+    weeklyReschedule: leaveRecords.filter(item => item.type === 'reschedule' || item.requestType === 'reschedule').length,
+    completedMakeup: leaveRecords.filter(item => item.status === 'completed' || item.status === 'makeup_completed').length,
+  }), [leaveRecords]);
+
+  const visibleRecords = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return leaveRecords;
+    return leaveRecords.filter(record => [record.studentName, record.teacherName, record.className, record.courseName, record.reason].some(value => value?.toLowerCase().includes(keyword)));
+  }, [leaveRecords, searchTerm]);
+
+  const refreshLeaves = async () => {
+    setIsLoading(true);
+    try {
+      const latest = await leaveMakeupService.list(filters);
+      setLeaveRecords(latest);
+    } catch (error) {
+      toast.error(`请假补课加载失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshLeaves();
+  }, [filters.requestType, filters.status, filters.teacherId, filters.studentId, filters.startDate, filters.endDate]);
 
   const getStatusBadge = (status: string) => {
     switch(status) {
       case 'approved': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">已同意</span>;
       case 'pending': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-700">待审批</span>;
       case 'rejected': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">已拒绝</span>;
+      case 'makeup_pending': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700">待安排补课</span>;
       case 'makeup_scheduled': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">补课已排</span>;
       case 'makeup_completed': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">补课完成</span>;
+      case 'completed': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">已完成</span>;
+      case 'parent_notified': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-indigo-100 text-indigo-700">已通知家长</span>;
+      case 'cancelled': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">已取消</span>;
       default: return null;
     }
   };
@@ -28,7 +63,76 @@ export function Leaves() {
       case 'teacher_leave': return <span className="px-2 py-1 text-xs font-medium rounded bg-purple-50 text-purple-600 border border-purple-100">老师请假</span>;
       case 'reschedule': return <span className="px-2 py-1 text-xs font-medium rounded bg-blue-50 text-blue-600 border border-blue-100">临时调课</span>;
       case 'cancel': return <span className="px-2 py-1 text-xs font-medium rounded bg-red-50 text-red-600 border border-red-100">课程取消</span>;
+      case 'cancellation': return <span className="px-2 py-1 text-xs font-medium rounded bg-red-50 text-red-600 border border-red-100">课程取消</span>;
+      case 'makeup': return <span className="px-2 py-1 text-xs font-medium rounded bg-green-50 text-green-600 border border-green-100">补课安排</span>;
       default: return null;
+    }
+  };
+
+  const handleCreate = async () => {
+    const scheduleId = window.prompt('请输入原排课 scheduleId');
+    if (!scheduleId) return;
+    const requestType = (window.prompt('申请类型：student_leave / teacher_leave / reschedule / cancellation / makeup', 'student_leave') || 'student_leave') as 'student_leave';
+    const reason = window.prompt('请输入申请原因');
+    if (!reason) return;
+    try {
+      const created = await leaveMakeupService.create({ scheduleId, requestType, reason });
+      setLeaveRecords(prev => [created, ...prev]);
+      toast.success('请假补课申请已创建');
+    } catch (error) {
+      toast.error(`创建失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const updateSelected = (updated: LeaveRecord) => {
+    setSelectedRecord(updated);
+    setLeaveRecords(prev => prev.map(item => item.id === updated.id ? updated : item));
+  };
+
+  const handleApprove = async () => {
+    if (!selectedRecord) return;
+    try {
+      updateSelected(await leaveMakeupService.approve(selectedRecord.id, window.prompt('审批备注（可选）') || undefined));
+      toast.success('审批已通过');
+    } catch (error) {
+      toast.error(`审批失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!selectedRecord) return;
+    const rejectReason = window.prompt('请输入拒绝原因');
+    if (!rejectReason) return;
+    try {
+      updateSelected(await leaveMakeupService.reject(selectedRecord.id, rejectReason));
+      toast.success('申请已拒绝');
+    } catch (error) {
+      toast.error(`拒绝失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const handleScheduleMakeup = async () => {
+    if (!selectedRecord) return;
+    const date = window.prompt('补课日期 YYYY-MM-DD', selectedRecord.newDate || selectedRecord.originalDate);
+    const startTime = window.prompt('开始时间 HH:mm', selectedRecord.newStartTime || '10:00');
+    const endTime = window.prompt('结束时间 HH:mm', selectedRecord.newEndTime || '12:00');
+    if (!date || !startTime || !endTime) return;
+    try {
+      const result = await leaveMakeupService.scheduleMakeup(selectedRecord.id, { date, startTime, endTime, teacherId: selectedRecord.teacherId, classroom: 'Makeup Room', notes: '请假补课安排' });
+      updateSelected(result.request);
+      toast.success('补课已安排');
+    } catch (error) {
+      toast.error(`安排补课失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const handleNotifyParent = async () => {
+    if (!selectedRecord) return;
+    try {
+      updateSelected(await leaveMakeupService.notifyParent(selectedRecord.id, '请假补课处理进度已更新'));
+      toast.success('已模拟通知家长');
+    } catch (error) {
+      toast.error(`通知失败：${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
 
@@ -36,7 +140,7 @@ export function Leaves() {
     <div className="space-y-6 relative">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900">请假补课</h1>
-        <button className="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 flex items-center gap-2">
+        <button onClick={handleCreate} className="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 flex items-center gap-2">
           发起申请
         </button>
       </div>
@@ -102,14 +206,22 @@ export function Leaves() {
             />
           </div>
           <div className="flex gap-2 w-full sm:w-auto">
-            <button className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 w-full sm:w-auto justify-center">
-              <Filter className="w-4 h-4" />
-              类型
-            </button>
-            <button className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 w-full sm:w-auto justify-center">
-              <Filter className="w-4 h-4" />
-              状态
-            </button>
+            <select value={filters.requestType} onChange={e => setFilters({ ...filters, requestType: e.target.value })} className="px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg">
+              <option value="">全部类型</option>
+              <option value="student_leave">学生请假</option>
+              <option value="teacher_leave">老师请假</option>
+              <option value="reschedule">调课</option>
+              <option value="cancellation">课程取消</option>
+              <option value="makeup">补课</option>
+            </select>
+            <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })} className="px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg">
+              <option value="">全部状态</option>
+              <option value="pending">待审批</option>
+              <option value="approved">已同意</option>
+              <option value="makeup_pending">待安排补课</option>
+              <option value="makeup_scheduled">补课已排</option>
+              <option value="parent_notified">已通知家长</option>
+            </select>
           </div>
         </div>
 
@@ -128,7 +240,7 @@ export function Leaves() {
               </tr>
             </thead>
             <tbody>
-              {leaveRecords.map((record) => (
+              {visibleRecords.map((record) => (
                 <tr 
                   key={record.id} 
                   className="bg-white border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
@@ -142,7 +254,7 @@ export function Leaves() {
                     <div className="text-xs text-gray-500">{record.className}</div>
                   </td>
                   <td className="px-6 py-4 text-gray-700">
-                    {record.originalDate}
+                    {record.originalDate} {record.originalTime || ''}
                   </td>
                   <td className="px-6 py-4 text-gray-600 truncate max-w-[150px]">
                     {record.reason}
@@ -215,11 +327,19 @@ export function Leaves() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="block text-gray-500 mb-1">关联课程</span>
-                    <span className="font-medium text-gray-900">{selectedRecord.className}</span>
+                    <span className="font-medium text-gray-900">{selectedRecord.courseName || selectedRecord.className}</span>
                   </div>
                   <div>
                     <span className="block text-gray-500 mb-1">原上课时间</span>
-                    <span className="font-medium text-gray-900">{selectedRecord.originalDate}</span>
+                    <span className="font-medium text-gray-900">{selectedRecord.originalDate} {selectedRecord.originalTime || ''}</span>
+                  </div>
+                  <div>
+                    <span className="block text-gray-500 mb-1">补课时间</span>
+                    <span className="font-medium text-gray-900">{selectedRecord.newDate ? `${selectedRecord.newDate} ${selectedRecord.newStartTime || ''}` : '-'}</span>
+                  </div>
+                  <div>
+                    <span className="block text-gray-500 mb-1">通知状态</span>
+                    <span className="font-medium text-gray-900">{selectedRecord.parentNotified || selectedRecord.notifyStatus === 'notified' ? '已通知家长' : '未通知'}</span>
                   </div>
                   <div className="col-span-2">
                     <span className="block text-gray-500 mb-1">申请原因</span>
@@ -235,10 +355,10 @@ export function Leaves() {
                 <h4 className="font-bold text-gray-900">审批与处理</h4>
                 
                 <div className="flex gap-3">
-                  <button className="flex-1 py-2 bg-green-50 text-green-700 font-medium rounded-lg border border-green-200 hover:bg-green-100 flex justify-center items-center gap-2">
+                  <button onClick={handleApprove} className="flex-1 py-2 bg-green-50 text-green-700 font-medium rounded-lg border border-green-200 hover:bg-green-100 flex justify-center items-center gap-2">
                     <CheckCircle2 className="w-4 h-4" /> 批准申请
                   </button>
-                  <button className="flex-1 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 flex justify-center items-center gap-2">
+                  <button onClick={handleReject} className="flex-1 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 flex justify-center items-center gap-2">
                     <XCircle className="w-4 h-4" /> 拒绝申请
                   </button>
                 </div>
@@ -248,11 +368,11 @@ export function Leaves() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">课时处理</label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                        <input type="radio" name="credit" className="text-blue-600 focus:ring-blue-500" defaultChecked={!selectedRecord.deductCredit} />
+                      <input type="radio" name="credit" className="text-blue-600 focus:ring-blue-500" checked={!selectedRecord.deductCredit} readOnly />
                         不扣课时，安排补课
                       </label>
                       <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                        <input type="radio" name="credit" className="text-blue-600 focus:ring-blue-500" defaultChecked={selectedRecord.deductCredit} />
+                        <input type="radio" name="credit" className="text-blue-600 focus:ring-blue-500" checked={selectedRecord.deductCredit} readOnly />
                         直接扣除课时
                       </label>
                     </div>
@@ -261,16 +381,16 @@ export function Leaves() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">补课安排 (如需)</label>
                     <div className="flex gap-2">
-                      <input type="datetime-local" className="flex-1 bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2" />
-                      <button className="px-3 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100">
-                        AI 推荐时间
+                      <input type="text" value={selectedRecord.newDate ? `${selectedRecord.newDate} ${selectedRecord.newStartTime || ''}-${selectedRecord.newEndTime || ''}` : ''} readOnly className="flex-1 bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2" />
+                      <button onClick={handleScheduleMakeup} className="px-3 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100">
+                        安排补课
                       </button>
                     </div>
                   </div>
 
                   <div className="pt-2">
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" defaultChecked />
+                      <input type="checkbox" className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" checked={selectedRecord.parentNotified || selectedRecord.notifyStatus === 'notified'} readOnly />
                       <Bell className="w-4 h-4 text-gray-400" /> 处理完成后自动通知家长和老师
                     </label>
                   </div>
@@ -280,11 +400,11 @@ export function Leaves() {
 
             {/* Actions Footer */}
             <div className="p-4 bg-white border-t border-gray-200 flex justify-end gap-3 shrink-0">
-              <button className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+              <button onClick={() => setSelectedRecord(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
                 取消
               </button>
-              <button className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-                确认处理
+              <button onClick={handleNotifyParent} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+                通知家长
               </button>
             </div>
           </div>

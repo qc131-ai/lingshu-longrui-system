@@ -69,12 +69,16 @@
 |------|------|
 | **页面名称** | 排课管理（`/schedule`） |
 | **前端交互** | 点击「新建排课」或日历格 → 填写 Modal →「保存排课」；冲突时二次确认 |
-| **当前调用的 service 函数** | `scheduleService.createSchedule(input, existingEvents)`<br>`scheduleService.getTeacherOptionsSync()`（教师下拉）<br>`courseService.list()`（**间接**，经 `AppContext` 提供课程选项） |
-| **未来对应的后端 API** | `POST /api/schedule/events` |
-| **请求字段** | `courseName`（由 UI `courseId` 解析）、`teacher`（由 UI `teacherId` 解析）、`roomId`（`room-1` / `room-2` / `room-3`）、`date`（YYYY-MM-DD）、`startTime`（HH:mm）、`duration`（小时，number） |
-| **返回字段** | `{ event: Schedule, hasConflict: boolean }`<br>`Schedule`：`id`、`colIndex`、`topIndex`、`durationSlots`、`title`、`teacher`、`room`、`timeString`、`type` |
+| **当前调用的 service 函数** | `scheduleService.listEvents()`、`scheduleService.createSchedule()`、`scheduleService.updateSchedule()`、`scheduleService.updateScheduleStatus()`、`scheduleService.cancelSchedule()`<br>`courseService.list()`（**间接**，经 `AppContext` 提供课程选项） |
+| **后端 API** | `GET /api/schedules`、`POST /api/schedules`、`PUT /api/schedules/:id`、`PATCH /api/schedules/:id/status` |
+| **查询字段** | `startDate`、`endDate`、`teacherId`、`studentId`、`classId`、`courseId`、`status`；空值、`undefined`、`null`、`Invalid Date` 会被忽略 |
+| **创建字段** | `courseId` / `courseName`、`teacherId` / `teacher`、`studentId`、`classId`、`roomId`（仅真实 UUID）、`classroom`、`date`、`startTime`、`endTime`、`duration`、`lessonType`、`status`、`notes` |
+| **编辑字段** | `date`、`startTime`、`endTime`、`teacherId`、`roomId`（仅真实 UUID）、`classroom`、`status`、`cancelReason`、`notes` |
+| **返回字段** | `Schedule`：`id`、`courseId`、`teacherId`、`studentId`、`classId`、`roomId`、`colIndex`、`topIndex`、`durationSlots`、`title`、`courseName`、`studentName`、`className`、`teacher`、`room`、`classroom`、`timeString`、`startTime`、`endTime`、`type`、`status`、`date`、`notes`、`cancelReason`、`createdBy`、`updatedAt` |
 | **是否需要权限校验** | 是 · `admin` / `advisor` / 排课专员 |
 | **是否第一阶段 MVP 必做** | **是** |
+
+> Sprint 3-1 约定：取消排课不删除记录，而是调用 `PATCH /api/schedules/:id/status`，传 `{ status: "cancelled", cancelReason }`。排课详情 Drawer 展示真实后端字段；编辑/取消成功后刷新当前周日历。
 
 ---
 
@@ -93,18 +97,31 @@
 
 ---
 
-## 6. 提交上课记录
+## 6. 上课记录与老师反馈
 
 | 项目 | 内容 |
 |------|------|
 | **页面名称** | 上课记录与消课（`/records`） |
-| **前端交互** | 点击记录行 → Drawer 填写课堂反馈（本节课内容、课堂表现、课后作业）→「保存草稿」或随消课一并提交 |
-| **当前调用的 service 函数** | `lessonService.updateRecord(id, data)`（**service 已定义**）<br>「保存草稿」当前为 **仅 UI**（`toast`，未调 service）<br>「提交并确认消课」走 `lessonService.confirmDeduct()`（见第 7 条，合并提交反馈 + 消课） |
-| **未来对应的后端 API** | `PATCH /api/lesson-records/:id`（草稿/提交反馈） |
-| **请求字段** | 路径参数 `id`；Body：`status`、`attendance`、`creditsConsumed`、`topic`、`performance`、`homework`、`feedbackStatus`（`pending` \| `submitted`）、`needAdvisorFollowUp`（建议扩展）、`syncToParent`（建议扩展） |
-| **返回字段** | 更新后的 `LessonRecord` |
-| **是否需要权限校验** | 是 · `teacher`（本人课程）/ `admin` |
+| **前端交互** | 页面加载真实上课记录；支持日期、老师、课程、状态和关键词筛选；点击记录打开 Drawer 填写老师反馈并确认消课 |
+| **当前调用的 service 函数** | `lessonService.listRecords()`、`lessonService.saveDraft()`、`lessonService.submitFeedback()`、`lessonService.generateFeedback()`、`lessonService.confirmDeduction()` |
+| **后端 API** | `GET /api/lesson-records`、`GET /api/lesson-records/:id`、`PUT /api/lesson-records/:id`、`PATCH /api/lesson-records/:id/status`、`POST /api/lesson-records/:id/confirm-deduction` |
+| **请求字段** | 草稿/反馈 Body：`topic`、`performance`、`knowledgeMastery`、`homework`、`nextPlan`、`needAdvisorFollowUp`、`syncToParent`、`internalNotes`、`aiSummary`、`status`、`feedbackStatus` |
+| **返回字段** | `LessonRecord`：排课来源、学员/班级、课程、老师、日期时间、教室、课时、状态、反馈字段、AI 总结、消课状态 |
+| **是否需要权限校验** | 是 · `admin` / `academic_manager` 可查看全部；`teacher` 仅本人；`advisor` 仅查看负责学生且不能修改；`finance` 不可访问详情 |
 | **是否第一阶段 MVP 必做** | **是**（消课前置；草稿保存可 MVP 与消课合并实现） |
+
+> Sprint 3-3 起，消课在老师反馈提交后由管理员/教务主管确认。确认消课会扣减课时账户、生成课时流水，并把 lesson record 标记为 `deducted`。
+
+## 6.1 从排课生成上课记录
+
+| 项目 | 内容 |
+|------|------|
+| **页面名称** | 排课管理（`/schedule`） |
+| **前端交互** | 排课详情 Drawer →「生成上课记录」；已生成时显示「查看上课记录」 |
+| **当前调用的 service 函数** | `lessonService.createFromSchedule(scheduleId)` |
+| **后端 API** | `POST /api/lesson-records/from-schedule/:scheduleId` |
+| **规则** | 一个 schedule 默认只生成一条记录；重复生成返回已有记录；继承 schedule 的课程、老师、学员或班级、日期时间、教室、课时 |
+| **初始状态** | `pending_feedback`，反馈状态 `pending` |
 
 ---
 
@@ -113,12 +130,12 @@
 | 项目 | 内容 |
 |------|------|
 | **页面名称** | 上课记录与消课（`/records`） |
-| **前端交互** | 记录详情 Drawer →（可选）生成 AI 反馈 → 点击「提交并确认消课」→ 二次确认 |
-| **当前调用的 service 函数** | `lessonService.confirmDeduct({ record, student, aiSummary? })`<br>`lessonService.listRecords()`（**间接**，列表数据经 `AppContext`） |
-| **未来对应的后端 API** | `POST /api/lesson-records/:id/deduct` |
-| **请求字段** | 路径参数 `id`；Body：`aiSummary`（可选，AI 课后反馈摘要） |
-| **返回字段** | `{ student: Student, record: LessonRecord }`<br>副作用：学员 `remainingCredits` 减少 `creditsConsumed`；记录 `status` → `completed`，`feedbackStatus` → `submitted` |
-| **是否需要权限校验** | 是 · `teacher` / `advisor` / `admin` |
+| **前端交互** | 记录详情 Drawer →「确认消课」区域展示当前余额、本次扣减和扣减后余额 → 二次确认 |
+| **当前调用的 service 函数** | `lessonService.confirmDeduction(id, { consumedHours, deductionNote, syncToParent })`<br>`creditService.listAccounts({ studentId, courseId })` |
+| **后端 API** | `POST /api/lesson-records/:id/confirm-deduction` |
+| **请求字段** | 路径参数 `id`；Body：`consumedHours`、`deductionNote?`、`syncToParent?` |
+| **返回字段** | `{ lessonRecord, creditAccount, creditTransaction }`<br>副作用：`credit_accounts.remainingHours` 减少；`credit_transactions` 新增 `lesson_deduction`；记录 `deductionStatus` → `deducted`、`status` → `completed` |
+| **是否需要权限校验** | 是 · `admin` / `academic_manager` 可确认；`teacher` / `advisor` / `finance` 默认不可确认 |
 | **是否第一阶段 MVP 必做** | **是** |
 
 ---
@@ -129,11 +146,11 @@
 |------|------|
 | **页面名称** | 订单与课时（`/orders`） |
 | **前端交互** | 点击「课时调整」→ Modal 选择学员、调整类型、变动课时等 →「确认调整」 |
-| **当前调用的 service 函数** | `creditService.adjustCredits({ student, adjustType, creditsAmount, courseName?, amount?, notes? })` |
-| **未来对应的后端 API** | `POST /api/credit-transactions/adjust` |
-| **请求字段** | `studentId`（由 UI 选择学员解析）、`adjustType`（`purchase` \| `gift` \| `transfer_in` \| `makeup_return` \| `deduct` \| `refund` \| `transfer_out` \| `manual`）、`creditsAmount`（非 0）、`courseName`、`amount`、`notes` |
-| **返回字段** | `{ student: Student, transaction: CreditTransaction }`<br>`CreditTransaction`：`id`、`studentId`、`studentName`、`courseName`、`amount`、`creditsAdded`、`creditsConsumed`、`date`、`status` |
-| **是否需要权限校验** | 是 · `finance` / `admin` |
+| **当前调用的 service 函数** | `creditService.adjustCredits({ studentId, courseId?, transactionType, hoursChange, note? })` |
+| **后端 API** | `POST /api/credits/adjust` |
+| **请求字段** | `studentId`、`courseId?`、`transactionType`、`hoursChange`（正增负减，非 0）、`note?` |
+| **返回字段** | `{ student, creditAccount, transaction }`<br>`CreditTransaction`：`id`、`studentId`、`courseId`、`creditAccountId`、`transactionType`、`hoursChange`、`balanceBefore`、`balanceAfter`、`operatorId`、`note`、`createdAt` |
+| **是否需要权限校验** | 是 · `admin` / `academic_manager` / `finance` |
 | **是否第一阶段 MVP 必做** | **是** |
 
 ---
@@ -144,10 +161,10 @@
 |------|------|
 | **页面名称** | 订单与课时（`/orders`） |
 | **前端交互** | 页面加载展示课时流水表格；支持搜索订单号/学生姓名；右侧「课时台账摘要」展示汇总 |
-| **当前调用的 service 函数** | `creditService.listTransactions()`（**间接**，经 `bootstrap` → `AppContext.orders`）<br>`creditService.getOrdersPageStatsSync()`、`creditService.getLedgerSummarySync()`（页头统计与台账摘要） |
-| **未来对应的后端 API** | `GET /api/credit-transactions`（支持 `?studentId=&status=&dateFrom=&dateTo=`）<br>`GET /api/credit-transactions/ledger`（台账摘要）<br>`GET /api/credit-transactions/stats`（页头 KPI） |
-| **请求字段** | 查询参数：`studentId`、`status`、`keyword`、`page`、`pageSize`（建议分页） |
-| **返回字段** | `CreditTransaction[]`；台账摘要：`totalRemainingHours`、`monthlyConsumedHours`；统计：`monthlyNewOrders`、`monthlyRevenue`、`pendingOrders`、`warningStudents` |
+| **当前调用的 service 函数** | `creditService.listTransactions()`、`creditService.listAccounts({ lowBalance: true })`<br>`creditService.getOrdersPageStatsSync()`、`creditService.getLedgerSummarySync()`（页头统计与台账摘要） |
+| **后端 API** | `GET /api/credits/transactions`、`GET /api/credits/accounts`、`GET /api/credits/accounts/:id` |
+| **请求字段** | 流水查询：`studentId`、`courseId`、`transactionType`、`startDate`、`endDate`；账户查询：`studentId`、`courseId`、`lowBalance=true`、`status` |
+| **返回字段** | `CreditTransaction[]`、`CreditAccount[]`；低课时账户由 `remainingHours <= 5` 或 `lowBalance=true` 标记 |
 | **是否需要权限校验** | 是 · `finance` / `advisor`（仅自己学员）/ `admin` |
 | **是否第一阶段 MVP 必做** | **是** |
 
@@ -155,35 +172,37 @@
 
 ---
 
-## 10. 生成家长报告
+## 10. 请假补课
 
 | 项目 | 内容 |
 |------|------|
-| **页面名称** | 家长报告（`/reports`） |
-| **前端交互** | 进入页面加载报告画布（学习数据、趋势图、雷达图）→ 点击「生成 AI 摘要」 |
-| **当前调用的 service 函数** | `reportService.getParentReportSync()` / `reportService.getParentReport(studentId?)`（报告主体数据）<br>`reportService.getTrendDataSync()`、`reportService.getRadarDataSync()`（图表）<br>`reportService.generateParentReportSummary(studentId?)`（AI 摘要） |
-| **未来对应的后端 API** | `GET /api/reports/parent/:studentId`（报告数据）<br>`GET /api/reports/trend?studentId=`（趋势图）<br>`GET /api/reports/radar?studentId=`（雷达图）<br>`POST /api/reports/parent/summary`（AI 摘要） |
-| **请求字段** | 路径/查询：`studentId`；AI 摘要 Body：`{ studentId?: string }` |
-| **返回字段** | `ParentReport`：`studentName`、`grade`、`courses`、`advisor`、`period`、`monthlyHours`、`attendanceRate`、`homeworkRate`、`scoreImprovement`、`courseRecords[]`<br>AI 摘要：`{ summary: string }` |
-| **是否需要权限校验** | 是 · `advisor` / `admin` |
-| **是否第一阶段 MVP 必做** | **否**（可先展示静态/半自动报告；AI 摘要为增强） |
+| **页面名称** | 请假补课（`/leaves`） |
+| **前端交互** | 页面加载真实请假补课申请；支持类型、状态、老师、学员、日期范围筛选；点击申请打开右侧 Drawer 查看流程并执行审批、拒绝、安排补课、通知家长 |
+| **当前调用的 service 函数** | `leaveMakeupService.list()`、`create()`、`approve()`、`reject()`、`scheduleMakeup()`、`notifyParent()` |
+| **后端 API** | `GET /api/leave-makeup`、`GET /api/leave-makeup/:id`、`POST /api/leave-makeup`、`PUT /api/leave-makeup/:id`、`PATCH /api/leave-makeup/:id/status`、`POST /api/leave-makeup/:id/approve`、`POST /api/leave-makeup/:id/reject`、`POST /api/leave-makeup/:id/schedule-makeup`、`POST /api/leave-makeup/:id/notify-parent` |
+| **请求字段** | 创建：`scheduleId`、`lessonRecordId?`、`requestType`、`reason`、`deductCredit?`、`needMakeup?`、`newDate?`、`newStartTime?`、`newEndTime?`；安排补课：`date`、`startTime`、`endTime`、`teacherId?`、`classroom?`、`lessonType?`、`notes?` |
+| **返回字段** | `LeaveRecord`：原排课、学员/班级、课程、老师、原时间、新时间、原因、是否扣课时、是否需要补课、审批状态、通知状态、补课排课 |
+| **是否需要权限校验** | 是 · `admin` / `academic_manager` 全部；`advisor` 仅负责学员提交和通知；`teacher` 仅自己的老师请假；`finance` 无操作权限 |
+| **是否第一阶段 MVP 必做** | **是**（教务异常流程） |
 
-> 学员详情 Drawer「生成家长报告」当前为 **仅 UI**（toast），正式流程以 `/reports` 页为准。
+> 排课详情 Drawer 已增加「学生请假」「老师请假」「调课」「取消课程」快捷入口，自动带入当前 `scheduleId`，后端从原排课补齐课程、老师、学员/班级和原时间。
 
 ---
 
-## 11. 发送家长报告
+## 11. 家长报告
 
 | 项目 | 内容 |
 |------|------|
 | **页面名称** | 家长报告（`/reports`） |
-| **前端交互** | 点击「发送给家长」→ 二次确认 → 通过企微/短信/邮件推送报告（含 AI 摘要） |
-| **当前调用的 service 函数** | **无**（当前为 `confirm` + `toast`，**待新增** `reportService.sendParentReport()`） |
-| **未来对应的后端 API** | `POST /api/reports/parent/:studentId/send` |
-| **请求字段** | 路径参数 `studentId`；Body：`channel`（`wecom` \| `sms` \| `email`）、`summary`（可选，附 AI 摘要）、`recipientPhone`（可选） |
-| **返回字段** | `{ success: boolean, sentAt: string, channel: string }` |
-| **是否需要权限校验** | 是 · `advisor` / `admin`；需审计日志 |
-| **是否第一阶段 MVP 必做** | **否**（第二阶段对接消息通道） |
+| **前端交互** | 页面加载真实报告列表；支持学员、课程、类型、状态筛选；点击「生成报告」弹窗选择周期和包含模块；点击报告展示家长预览画布；支持编辑、模拟发送、导出 PDF toast |
+| **当前调用的 service 函数** | `reportService.listReports()`、`getReport()`、`generateReport()`、`updateReport()`、`updateStatus()`、`sendReport()` |
+| **后端 API** | `GET /api/reports`、`GET /api/reports/:id`、`POST /api/reports/generate`、`PUT /api/reports/:id`、`POST /api/reports/:id/send`、`PATCH /api/reports/:id/status` |
+| **请求字段** | 生成：`studentId`、`courseId?`、`reportType`、`reportPeriodStart`、`reportPeriodEnd`、`includeLessons?`、`includeCredits?`、`includeLeaveMakeup?`、`includeHomework?`、`includeAiSummary?` |
+| **返回字段** | `ParentReport`：报告标题、学员/课程/顾问、周期、状态、发送时间、阶段总结、老师反馈摘要、课时情况、请假补课摘要、薄弱点、下阶段计划、家长可见内容、图表数据 |
+| **是否需要权限校验** | 是 · `admin` / `academic_manager` 全部；`advisor` 生成和查看负责学员；`teacher` 仅查看相关摘要；`finance` 不可访问 |
+| **是否第一阶段 MVP 必做** | **是**（家校沟通闭环） |
+
+> 报告预览只展示家长可见内容，不显示 `internalNotes`、`operation_logs` 或非授权财务敏感字段；PDF 本阶段为 toast 占位。
 
 ---
 
@@ -250,7 +269,7 @@
 | `studentService` | `createStudent`、`getStudentDetail`、`updateStudent`、`list` | `/students` |
 | `courseService` | `list`、`createCourse` | `/courses`、`/schedule`（课程选项） |
 | `scheduleService` | `createSchedule`、`cancelSchedule`、`listEvents` | `/schedule` |
-| `lessonService` | `listRecords`、`updateRecord`、`confirmDeduct`、`generateFeedback` | `/records` |
+| `lessonService` | `listRecords`、`updateRecord`、`confirmDeduction`、`generateFeedback` | `/records` |
 | `creditService` | `listTransactions`、`adjustCredits` | `/orders` |
 | `reportService` | `getParentReport`、`generateParentReportSummary` | `/reports` |
 | `aiService` | `queryAssistant`、`generateRenewalSuggestion` | `/ai`、`/orders` |

@@ -10,16 +10,20 @@ export async function logOperation(
     detail?: unknown;
   }
 ) {
-  await prisma.operationLog.create({
-    data: {
-      organizationId: req.user.organizationId,
-      userId: req.user.id,
-      action: input.action,
-      resourceType: input.resourceType,
-      resourceId: input.resourceId,
-      detail: input.detail ? JSON.parse(JSON.stringify(input.detail)) : undefined,
-      ipAddress: req.ip,
-      userAgent: req.header("user-agent"),
-    },
-  });
+  try {
+    await prisma.operationLog.create({
+      data: {
+        organizationId: req.user.organizationId,
+        userId: req.user.id,
+        action: input.action,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        detail: input.detail ? JSON.parse(JSON.stringify(input.detail)) : undefined,
+        ipAddress: req.ip,
+        userAgent: req.header("user-agent"),
+      },
+    });
+  } catch (error) {
+    console.warn(`Operation log failed for ${input.action}:`, error);
+  }
 }

@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Search, Filter, CreditCard, Clock, CheckCircle2, AlertCircle, Plus, ChevronRight, Coins, Settings2, Sparkles, FileText } from 'lucide-react';
-import { RenewalSuggestion } from '../types';
+import type { CreditAccount, CreditTransaction, RenewalSuggestion } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { Modal } from '../components/ui/Modal';
 import { creditService } from '../services/creditService';
@@ -16,6 +16,8 @@ export function Orders() {
   const { orders, students, updateStudent, addOrder } = useAppContext();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
+  const [transactions, setTransactions] = useState<CreditTransaction[]>(orders);
+  const [lowBalanceAccounts, setLowBalanceAccounts] = useState<CreditAccount[]>([]);
   
   // Modals state
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
@@ -32,7 +34,24 @@ export function Orders() {
     notes: ''
   });
 
-  const filteredOrders = orders.filter(o => 
+  const refreshCredits = async () => {
+    try {
+      const [latestTransactions, lowAccounts] = await Promise.all([
+        creditService.listTransactions(),
+        creditService.listAccounts({ lowBalance: true }),
+      ]);
+      setTransactions(latestTransactions);
+      setLowBalanceAccounts(lowAccounts);
+    } catch (error) {
+      toast.error(`课时数据加载失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  useEffect(() => {
+    refreshCredits();
+  }, []);
+
+  const filteredOrders = transactions.filter(o => 
     o.id.includes(searchTerm) || o.studentName.includes(searchTerm)
   );
 
@@ -57,6 +76,8 @@ export function Orders() {
 
     updateStudent(result.student.id, { remainingCredits: result.student.remainingCredits });
     addOrder(result.transaction);
+    setTransactions(prev => [result.transaction, ...prev]);
+    await refreshCredits();
 
     toast.success(`已成功为 ${student.name} 调整课时`);
     setIsAdjustModalOpen(false);
@@ -246,10 +267,10 @@ export function Orders() {
                     课时预警 (低于10课时)
                   </p>
                   <div className="space-y-2 mt-3">
-                    {students.filter(s => s.remainingCredits <= 10).slice(0, 3).map(s => (
-                      <div key={s.id} className="flex justify-between items-center text-sm">
-                        <span className="text-gray-700">{s.name}</span>
-                        <span className="font-bold text-red-600">{s.remainingCredits} h</span>
+                    {lowBalanceAccounts.slice(0, 3).map(account => (
+                      <div key={account.id} className="flex justify-between items-center text-sm">
+                        <span className="text-gray-700">{account.studentName || account.studentId}</span>
+                        <span className="font-bold text-red-600">{account.remainingHours} h</span>
                       </div>
                     ))}
                     <button className="w-full mt-2 text-xs text-red-600 hover:text-red-700 font-medium text-center">

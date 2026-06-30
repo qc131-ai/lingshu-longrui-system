@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, MapPin, User, Clock, CheckCircle2 } from 'lucide-react';
-import { format, addDays, startOfWeek } from 'date-fns';
+import { format, addDays, addWeeks, startOfWeek } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 import { zhCN } from 'date-fns/locale';
 import { Modal } from '../components/ui/Modal';
 import { Drawer } from '../components/ui/Drawer';
 import { useAppContext } from '../context/AppContext';
 import type { Schedule } from '../types';
+import type { ScheduleStatus } from '../types/schedule';
 import { scheduleApiState, scheduleService } from '../services/scheduleService';
+import { lessonService } from '../services/lessonService';
+import { leaveMakeupService } from '../services/leaveMakeupService';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { can } from '../auth/permissions';
@@ -14,11 +18,13 @@ import { can } from '../auth/permissions';
 export function Schedule() {
   const { courses, students, teachers } = useAppContext();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const today = new Date();
-  const startDate = startOfWeek(today, { weekStartsOn: 1 }); // Start week on Monday
+  const [weekStartDate, setWeekStartDate] = useState(() => startOfWeek(today, { weekStartsOn: 1 }));
 
-  const weekDays = Array.from({ length: 7 }).map((_, i) => addDays(startDate, i));
+  const weekDays = useMemo(() => Array.from({ length: 7 }).map((_, i) => addDays(weekStartDate, i)), [weekStartDate]);
   const timeSlots = Array.from({ length: 13 }).map((_, i) => `${i + 8}:00`); // 8:00 to 20:00
+  const endTimeSlots = Array.from({ length: 14 }).map((_, i) => `${i + 8}:00`);
   const scheduleTeacherOptions = useMemo(
     () => teachers.length > 0
       ? teachers.map((teacher) => ({ id: teacher.id, name: teacher.name }))
@@ -29,10 +35,12 @@ export function Schedule() {
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Schedule | null>(null);
+  const [isEditingSchedule, setIsEditingSchedule] = useState(false);
 
   const [events, setEvents] = useState<Schedule[]>(scheduleService.getInitialEventsSync());
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [isUpdatingSchedule, setIsUpdatingSchedule] = useState(false);
 
   const [formData, setFormData] = useState({
     courseId: '',
@@ -42,6 +50,42 @@ export function Schedule() {
     startTime: '10:00',
     duration: 2,
   });
+  const [editFormData, setEditFormData] = useState({
+    date: '',
+    startTime: '10:00',
+    endTime: '12:00',
+    teacherId: '',
+    roomId: 'room-1',
+    classroom: '',
+    status: 'scheduled' as ScheduleStatus,
+    notes: '',
+  });
+
+  const statusLabels: Record<ScheduleStatus, string> = {
+    scheduled: '已排课',
+    in_progress: '进行中',
+    completed: '已完成',
+    cancelled: '已取消',
+    student_leave: '学生请假',
+    teacher_leave: '老师请假',
+    makeup_pending: '待补课',
+  };
+
+  const statusClassName: Record<ScheduleStatus, string> = {
+    scheduled: 'bg-blue-50 border-blue-200 text-blue-700',
+    in_progress: 'bg-amber-50 border-amber-200 text-amber-700',
+    completed: 'bg-green-50 border-green-200 text-green-700',
+    cancelled: 'bg-gray-50 border-gray-200 text-gray-500',
+    student_leave: 'bg-purple-50 border-purple-200 text-purple-700',
+    teacher_leave: 'bg-orange-50 border-orange-200 text-orange-700',
+    makeup_pending: 'bg-rose-50 border-rose-200 text-rose-700',
+  };
+
+  const roomOptions = [
+    { id: 'room-1', label: 'Room 101' },
+    { id: 'room-2', label: 'Room 202' },
+    { id: 'room-3', label: '线上会议 (Zoom)' },
+  ];
 
   useEffect(() => {
     if (scheduleTeacherOptions.length === 0) return;
@@ -53,12 +97,12 @@ export function Schedule() {
     setIsLoadingSchedule(true);
     try {
       const latestEvents = await scheduleService.listEvents({
-        startDate: format(startDate, 'yyyy-MM-dd'),
-        endDate: format(addDays(startDate, 6), 'yyyy-MM-dd'),
+        startDate: format(weekStartDate, 'yyyy-MM-dd'),
+        endDate: format(addDays(weekStartDate, 6), 'yyyy-MM-dd'),
       });
       setEvents(latestEvents);
-    } catch {
-      toast.error('排课日历加载失败，已保留本地数据');
+    } catch (error) {
+      toast.error(`排课日历加载失败：${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       setIsLoadingSchedule(false);
     }
@@ -66,7 +110,7 @@ export function Schedule() {
 
   useEffect(() => {
     refreshEvents();
-  }, []);
+  }, [weekStartDate]);
 
   const handleCreateSchedule = async (e: FormEvent) => {
     e.preventDefault();
@@ -110,16 +154,103 @@ export function Schedule() {
       }
       toast.success('排课成功');
       setIsScheduleModalOpen(false);
-    } catch {
-      toast.error('排课失败，请稍后重试');
+    } catch (error) {
+      toast.error(`排课失败：${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       setIsSavingSchedule(false);
     }
   };
 
-  const openEventDetails = (event: any) => {
+  const openEventDetails = (event: Schedule) => {
     setSelectedEvent(event);
+    setEditFormData({
+      date: event.date ?? format(weekDays[event.colIndex], 'yyyy-MM-dd'),
+      startTime: event.startTime ?? event.timeString.split(' - ')[0] ?? '10:00',
+      endTime: event.endTime ?? event.timeString.split(' - ')[1] ?? '12:00',
+      teacherId: event.teacherId ?? scheduleTeacherOptions[0]?.id ?? '',
+      roomId: event.roomId ?? 'room-1',
+      classroom: event.classroom ?? event.room,
+      status: event.status ?? 'scheduled',
+      notes: event.notes ?? '',
+    });
+    setIsEditingSchedule(false);
     setIsDetailDrawerOpen(true);
+  };
+
+  const handleUpdateSchedule = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedEvent) return;
+    setIsUpdatingSchedule(true);
+    try {
+      const updated = await scheduleService.updateSchedule(selectedEvent.id, editFormData);
+      setSelectedEvent(updated);
+      setIsEditingSchedule(false);
+      await refreshEvents();
+      toast.success('排课已更新');
+    } catch (error) {
+      toast.error(`排课更新失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsUpdatingSchedule(false);
+    }
+  };
+
+  const handleCancelSchedule = async () => {
+    if (!selectedEvent) return;
+    const cancelReason = window.prompt('请输入取消原因');
+    if (cancelReason === null) return;
+    if (!cancelReason.trim()) {
+      toast.error('请填写取消原因');
+      return;
+    }
+    setIsUpdatingSchedule(true);
+    try {
+      await scheduleService.cancelSchedule(selectedEvent.id, cancelReason.trim());
+      await refreshEvents();
+      setIsDetailDrawerOpen(false);
+      toast.success('排课已取消');
+    } catch (error) {
+      toast.error(`取消排课失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsUpdatingSchedule(false);
+    }
+  };
+
+  const handleLessonRecordAction = async () => {
+    if (!selectedEvent) return;
+    if (selectedEvent.lessonRecordId) {
+      navigate('/records');
+      return;
+    }
+    setIsUpdatingSchedule(true);
+    try {
+      await lessonService.createFromSchedule(selectedEvent.id);
+      await refreshEvents();
+      toast.success('上课记录已生成');
+      navigate('/records');
+    } catch (error) {
+      toast.error(`生成上课记录失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsUpdatingSchedule(false);
+    }
+  };
+
+  const handleCreateLeaveMakeup = async (requestType: 'student_leave' | 'teacher_leave' | 'reschedule' | 'cancellation') => {
+    if (!selectedEvent) return;
+    const reason = window.prompt('请输入申请原因');
+    if (!reason) return;
+    try {
+      await leaveMakeupService.create({
+        scheduleId: selectedEvent.id,
+        lessonRecordId: selectedEvent.lessonRecordId,
+        requestType,
+        reason,
+        needMakeup: requestType !== 'cancellation',
+        deductCredit: false,
+      });
+      toast.success('请假补课申请已创建');
+    } catch (error) {
+      toast.error(`创建申请失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
   return (
@@ -128,11 +259,11 @@ export function Schedule() {
         <h1 className="text-2xl font-bold text-gray-900">排课管理</h1>
         <div className="flex gap-3">
           <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg p-1">
-            <button className="p-1 hover:bg-gray-100 rounded text-gray-600">
+            <button className="p-1 hover:bg-gray-100 rounded text-gray-600" onClick={() => setWeekStartDate(prev => addWeeks(prev, -1))}>
               <ChevronLeft className="w-5 h-5" />
             </button>
             <span className="text-sm font-medium px-2">本周</span>
-            <button className="p-1 hover:bg-gray-100 rounded text-gray-600">
+            <button className="p-1 hover:bg-gray-100 rounded text-gray-600" onClick={() => setWeekStartDate(prev => addWeeks(prev, 1))}>
               <ChevronRight className="w-5 h-5" />
             </button>
           </div>
@@ -193,15 +324,16 @@ export function Schedule() {
                   <div 
                     key={ev.id}
                     onClick={() => openEventDetails(ev)}
-                    className="absolute left-1 right-1 bg-blue-50 border border-blue-200 rounded p-2 overflow-hidden hover:shadow-md hover:border-blue-300 cursor-pointer transition-all z-10"
+                  className={`absolute left-1 right-1 border rounded p-2 overflow-hidden hover:shadow-md cursor-pointer transition-all z-10 ${statusClassName[(ev.status ?? 'scheduled') as ScheduleStatus]} ${ev.status === 'cancelled' ? 'opacity-70' : ''}`}
                     style={{ 
                       top: `${ev.topIndex * 80 + 2}px`, 
                       height: `${ev.durationSlots * 80 - 4}px` 
                     }}
                   >
-                    <div className="text-xs font-bold text-blue-700 truncate">{ev.title}</div>
-                    <div className="text-[10px] text-blue-600 mt-0.5 truncate">{ev.teacher} • {ev.room}</div>
-                    <div className="text-[10px] text-blue-500 mt-1">{ev.timeString}</div>
+                    <div className="text-xs font-bold truncate">{ev.title}</div>
+                    <div className="text-[10px] mt-0.5 truncate">{ev.teacher} • {ev.room}</div>
+                    <div className="text-[10px] mt-1">{ev.timeString}</div>
+                    <div className="text-[10px] mt-1">{statusLabels[(ev.status ?? 'scheduled') as ScheduleStatus]}</div>
                   </div>
                 ))}
               </div>
@@ -246,9 +378,9 @@ export function Schedule() {
                 onChange={e => setFormData({...formData, roomId: e.target.value})} 
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
               >
-                <option value="room-1">Room 101</option>
-                <option value="room-2">Room 202</option>
-                <option value="room-3">线上会议 (Zoom)</option>
+                {roomOptions.map(room => (
+                  <option key={room.id} value={room.id}>{room.label}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -309,69 +441,154 @@ export function Schedule() {
               <div>
                 <h3 className="font-bold text-gray-900 text-lg">{selectedEvent.title}</h3>
                 <p className="text-blue-600 text-sm font-medium flex items-center gap-1 mt-0.5">
-                  <CheckCircle2 className="w-4 h-4" /> 正常排课
+                  <CheckCircle2 className="w-4 h-4" /> {statusLabels[(selectedEvent.status ?? 'scheduled') as ScheduleStatus]}
                 </p>
               </div>
             </div>
 
-            {/* Basic Info */}
-            <div className="grid grid-cols-2 gap-4">
-               <div>
+            {!isEditingSchedule ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">课程名称</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.courseName ?? selectedEvent.title}</div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">学员或班级</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.studentName || selectedEvent.className || '-'}</div>
+                </div>
+                <div>
                   <label className="text-xs text-gray-500 mb-1 block">授课教师</label>
                   <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
                     <User className="w-4 h-4 text-gray-400" />
                     {selectedEvent.teacher}
                   </div>
-               </div>
-               <div>
-                  <label className="text-xs text-gray-500 mb-1 block">上课教室</label>
-                  <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                    <MapPin className="w-4 h-4 text-gray-400" />
-                    {selectedEvent.room}
-                  </div>
-               </div>
-               <div>
-                  <label className="text-xs text-gray-500 mb-1 block">时间</label>
-                  <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-gray-400" />
-                    {selectedEvent.timeString} ({selectedEvent.durationSlots}h)
-                  </div>
-               </div>
-               <div>
-                  <label className="text-xs text-gray-500 mb-1 block">日期</label>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">上课日期</label>
                   <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
                     <CalendarIcon className="w-4 h-4 text-gray-400" />
-                    {format(weekDays[selectedEvent.colIndex], 'yyyy-MM-dd')}
+                    {selectedEvent.date ?? format(weekDays[selectedEvent.colIndex], 'yyyy-MM-dd')}
                   </div>
-               </div>
-            </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">开始时间</label>
+                  <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-gray-400" />
+                    {selectedEvent.startTime ?? selectedEvent.timeString.split(' - ')[0]}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">结束时间</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.endTime ?? selectedEvent.timeString.split(' - ')[1]}</div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">教室 / classroom</label>
+                  <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-gray-400" />
+                    {selectedEvent.classroom || selectedEvent.room || '-'}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">上课方式</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.type === 'class' ? '班课' : selectedEvent.type}</div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">课程状态</label>
+                  <div className="text-sm font-medium text-gray-900">{statusLabels[(selectedEvent.status ?? 'scheduled') as ScheduleStatus]}</div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">本次课时</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.durationSlots}h</div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">创建人</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.createdBy || '-'}</div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">最近更新时间</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.updatedAt ? new Date(selectedEvent.updatedAt).toLocaleString() : '-'}</div>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 mb-1 block">备注</label>
+                  <div className="text-sm font-medium text-gray-900">{selectedEvent.notes || selectedEvent.cancelReason || '-'}</div>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleUpdateSchedule} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">上课日期</label>
+                    <input type="date" value={editFormData.date} onChange={e => setEditFormData({ ...editFormData, date: e.target.value })} className="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-blue-500 focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                    <select value={editFormData.status} onChange={e => setEditFormData({ ...editFormData, status: e.target.value as ScheduleStatus })} className="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-blue-500 focus:border-blue-500">
+                      {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">开始时间</label>
+                    <select value={editFormData.startTime} onChange={e => setEditFormData({ ...editFormData, startTime: e.target.value })} className="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-blue-500 focus:border-blue-500">
+                      {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">结束时间</label>
+                    <select value={editFormData.endTime} onChange={e => setEditFormData({ ...editFormData, endTime: e.target.value })} className="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-blue-500 focus:border-blue-500">
+                      {endTimeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">老师</label>
+                    <select value={editFormData.teacherId} onChange={e => setEditFormData({ ...editFormData, teacherId: e.target.value })} className="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-blue-500 focus:border-blue-500">
+                      {scheduleTeacherOptions.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">教室 / classroom</label>
+                    <select value={editFormData.roomId} onChange={e => {
+                      const room = roomOptions.find(item => item.id === e.target.value);
+                      setEditFormData({ ...editFormData, roomId: e.target.value, classroom: room?.label ?? editFormData.classroom });
+                    }} className="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-blue-500 focus:border-blue-500">
+                      {roomOptions.map(room => <option key={room.id} value={room.id}>{room.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                    <textarea value={editFormData.notes} onChange={e => setEditFormData({ ...editFormData, notes: e.target.value })} className="w-full p-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-blue-500 focus:border-blue-500" rows={3} />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                  <button type="button" onClick={() => setIsEditingSchedule(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">取消</button>
+                  <button type="submit" disabled={isUpdatingSchedule} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">保存修改</button>
+                </div>
+              </form>
+            )}
 
             {/* Actions */}
-            <div className="pt-6 border-t border-gray-100 flex flex-col gap-3">
-               <button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition-colors">
+            {!isEditingSchedule && (
+              <div className="pt-6 border-t border-gray-100 flex flex-col gap-3">
+               <button onClick={() => setIsEditingSchedule(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition-colors">
                  编辑排课
                </button>
-               <button className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium rounded-lg text-sm px-4 py-2.5 transition-colors">
-                 生成上课记录
+               <button onClick={handleLessonRecordAction} disabled={isUpdatingSchedule} className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium rounded-lg text-sm px-4 py-2.5 transition-colors">
+                 {selectedEvent.lessonRecordId ? '查看上课记录' : '生成上课记录'}
                </button>
+               <div className="grid grid-cols-2 gap-2">
+                 <button onClick={() => handleCreateLeaveMakeup('student_leave')} className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium rounded-lg text-sm px-3 py-2 transition-colors">学生请假</button>
+                 <button onClick={() => handleCreateLeaveMakeup('teacher_leave')} className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium rounded-lg text-sm px-3 py-2 transition-colors">老师请假</button>
+                 <button onClick={() => handleCreateLeaveMakeup('reschedule')} className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium rounded-lg text-sm px-3 py-2 transition-colors">调课</button>
+                 <button onClick={() => handleCreateLeaveMakeup('cancellation')} className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium rounded-lg text-sm px-3 py-2 transition-colors">取消课程</button>
+               </div>
                <button 
-                onClick={async () => {
-                  if (confirm('确认取消此排课吗？')) {
-                    try {
-                      const updated = await scheduleService.cancelSchedule(selectedEvent.id, events);
-                      setEvents(updated);
-                      setIsDetailDrawerOpen(false);
-                      toast.success('排课已取消');
-                    } catch {
-                      toast.error('取消排课失败，请稍后重试');
-                    }
-                  }
-                }}
+                onClick={handleCancelSchedule}
+                disabled={isUpdatingSchedule || selectedEvent.status === 'cancelled'}
                 className="w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 font-medium rounded-lg text-sm px-4 py-2.5 transition-colors"
                >
                  取消排课
                </button>
-            </div>
+              </div>
+            )}
           </div>
         )}
       </Drawer>

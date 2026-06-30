@@ -34,6 +34,342 @@ Authorization: Bearer <token>
 
 ---
 
+## Sprint 3-1 排课日历 API
+
+排课相关接口均使用当前登录 token 中的 `organizationId` 做数据隔离，前端不得传 `organizationId`。
+
+### GET /api/schedules
+
+查询当前机构内的排课日历数据。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+|----------|------|------|------|
+| startDate | string | 否 | 开始日期，`YYYY-MM-DD` |
+| endDate | string | 否 | 结束日期，`YYYY-MM-DD` |
+| teacherId | string | 否 | 按老师筛选 |
+| studentId | string | 否 | 按学员筛选，包含直接学员排课、上课记录、班级学员 |
+| classId | string | 否 | 按班级筛选 |
+| courseId | string | 否 | 按课程筛选 |
+| status | enum | 否 | `scheduled`、`in_progress`、`completed`、`cancelled`、`student_leave`、`teacher_leave`、`makeup_pending` |
+
+`undefined`、`null`、空字符串、`Invalid Date` 会被忽略。
+
+### POST /api/schedules
+
+创建排课。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| courseId | string | 否 | 真实课程 UUID；也可用 `courseName` 兜底解析 |
+| courseName | string | 否 | 课程名称 |
+| teacherId | string | 否 | 真实老师 UUID；也可用 `teacher` 兜底解析 |
+| teacher | string | 否 | 老师姓名 |
+| studentId | string | 否 | 学员 UUID |
+| classId | string | 否 | 班级 UUID |
+| roomId | string | 否 | 仅允许真实 Room UUID；mock id 不应传 |
+| classroom | string | 否 | 教室文本，例如 `Room 301` |
+| date | string | 是 | 上课日期，`YYYY-MM-DD` |
+| startTime | string | 是 | 开始时间，`HH:mm` |
+| endTime | string | 否 | 结束时间，`HH:mm` |
+| duration | number | 否 | 本次课时，小时 |
+| consumedHours | number | 否 | 本次消耗课时，小时 |
+| lessonType | enum | 否 | `class`、`exam`、`meeting` |
+| status | enum | 否 | 默认 `scheduled` |
+| notes | string | 否 | 备注 |
+
+`roomId` 只有真实 UUID 才会关联 Room；非 UUID 会被忽略，使用 `classroom` 文本保存。
+
+### PUT /api/schedules/:id
+
+编辑排课。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| date | string | 否 | 上课日期 |
+| startTime | string | 否 | 开始时间 |
+| endTime | string | 否 | 结束时间 |
+| duration | number | 否 | 本次课时 |
+| teacherId | string | 否 | 老师 UUID |
+| studentId | string \| null | 否 | 学员 UUID，传 `null` 可清空 |
+| classId | string \| null | 否 | 班级 UUID，传 `null` 可清空 |
+| roomId | string | 否 | 仅真实 Room UUID |
+| classroom | string | 否 | 教室文本 |
+| status | enum | 否 | 排课状态 |
+| cancelReason | string | 否 | 取消原因 |
+| notes | string | 否 | 备注 |
+
+### PATCH /api/schedules/:id/status
+
+单独更新排课状态。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| status | enum | 是 | `scheduled`、`in_progress`、`completed`、`cancelled`、`student_leave`、`teacher_leave`、`makeup_pending` |
+| cancelReason | string | 否 | 当 `status=cancelled` 时作为取消原因 |
+| notes | string | 否 | 状态备注 |
+
+取消排课采用 `PATCH /api/schedules/:id/status`，Body 示例：
+
+```json
+{
+  "status": "cancelled",
+  "cancelReason": "学生临时请假"
+}
+```
+
+### 冲突响应
+
+新建或编辑排课时会检测老师、学员、班级、教室文本/Room 是否在同一日期同一时间冲突。
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "CONFLICT",
+    "message": "排课时间冲突",
+    "details": {
+      "conflictType": "teacher",
+      "conflictScheduleId": "..."
+    }
+  }
+}
+```
+
+以下操作会写入 `operation_logs`，日志失败只记录 warning，不阻断主流程：新建排课、编辑排课、取消排课、修改排课状态。
+
+## Sprint 3-2 上课记录与老师反馈 API
+
+上课记录接口均按当前 token 中的 `organizationId` 隔离数据。财务角色不应访问上课记录详情；老师仅能查看和编辑自己的记录；顾问可查看自己负责学生相关记录但不能修改老师反馈。
+
+### GET /api/lesson-records
+
+| 查询参数 | 类型 | 必填 | 说明 |
+|----------|------|------|------|
+| startDate | string | 否 | 开始日期，`YYYY-MM-DD` |
+| endDate | string | 否 | 结束日期，`YYYY-MM-DD` |
+| teacherId | string | 否 | 按老师筛选 |
+| courseId | string | 否 | 按课程筛选 |
+| status | enum | 否 | `draft`、`pending_feedback`、`submitted`、`completed`、`cancelled` |
+| search | string | 否 | 搜索学生、班级、课程 |
+
+### GET /api/lesson-records/:id
+
+返回单条上课记录详情，包含 `scheduleId`、`courseId/courseName`、`studentId/studentName`、`classId/className`、`teacherId/teacherName`、日期、开始/结束时间、教室、课时、反馈字段和 AI 总结。
+
+### POST /api/lesson-records
+
+手动创建上课记录。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| scheduleId | string | 否 | 来源排课 ID |
+| courseId | string | 否 | 课程 UUID |
+| studentId | string | 否 | 学员 UUID，`studentId` 和 `classId` 至少一个 |
+| classId | string | 否 | 班级 UUID，`studentId` 和 `classId` 至少一个 |
+| teacherId | string | 是 | 老师 UUID |
+| date | string | 是 | 上课日期 |
+| startTime | string | 否 | 开始时间 |
+| endTime | string | 否 | 结束时间 |
+| classroom | string | 否 | 教室文本 |
+| duration | number | 否 | 本节课时 |
+| status | enum | 否 | 默认 `draft` |
+
+### POST /api/lesson-records/from-schedule/:scheduleId
+
+从排课生成上课记录。
+
+规则：
+
+- 一个 schedule 默认只生成一条 lesson record，重复调用会返回已有记录。
+- 生成时继承 `scheduleId`、`courseId`、`studentId` 或 `classId`、`teacherId`、日期、开始/结束时间、教室、课时。
+- 初始状态为 `pending_feedback`，反馈状态为 `pending`。
+- 写入 `operation_logs`，日志失败只 warning。
+
+### PUT /api/lesson-records/:id
+
+保存老师反馈草稿或更新记录字段。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| topic | string | 否 | 本节课内容 |
+| performance | string | 否 | 学生课堂表现 |
+| knowledgeMastery | string | 否 | 知识点掌握情况 |
+| homework | string | 否 | 作业布置 |
+| nextPlan | string | 否 | 下节课计划 |
+| needAdvisorFollowUp | boolean | 否 | 是否需要顾问跟进 |
+| syncToParent | boolean | 否 | 是否同步给家长 |
+| internalNotes | string | 否 | 内部备注 |
+| aiSummary | string | 否 | AI 反馈总结 |
+| status | enum | 否 | `draft`、`pending_feedback`、`submitted`、`completed`、`cancelled` |
+| feedbackStatus | enum | 否 | `pending`、`submitted` |
+
+### PATCH /api/lesson-records/:id/status
+
+单独修改上课记录状态。提交反馈时前端先 `PUT` 保存反馈字段，再 `PATCH` 为 `submitted`。提交后关联 schedule 状态更新为 `completed`。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| status | enum | 是 | `draft`、`pending_feedback`、`submitted`、`completed`、`cancelled` |
+| aiSummary | string | 否 | AI 总结 |
+
+### 状态流转
+
+```text
+draft -> pending_feedback -> submitted -> completed
+                           -> cancelled
+```
+
+## Sprint 3-3 确认消课与课时流水 API
+
+消课、课时账户、课时流水接口均按当前 token 中的 `organizationId` 隔离数据；前端不得传 `organizationId`。消课只允许管理员、教务主管确认；财务可查看和调整课时但默认不确认消课；老师和顾问不能手动调整课时。
+
+### POST /api/lesson-records/:id/confirm-deduction
+
+确认消课。仅 `submitted` 或 `completed` 的上课记录可以消课；已消课记录会被后端拦截。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| consumedHours | number | 是 | 本次扣减课时，必须大于 0 |
+| deductionNote | string | 否 | 消课备注 |
+| syncToParent | boolean | 否 | 是否同步给家长 |
+
+返回：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| lessonRecord | LessonRecord | 消课后的上课记录，`deductionStatus=deducted`，`status=completed` |
+| creditAccount | CreditAccount | 扣减后的课时账户 |
+| creditTransaction | CreditTransaction | 本次自动生成的课时流水 |
+
+业务规则：
+
+- 上课记录必须关联 `studentId` 和 `courseId`，否则返回明确错误。
+- 系统按 `studentId + courseId + organizationId` 查找课时账户；未找到时返回 `未找到该学生课程的课时账户`，不静默创建账户。
+- 非管理员不能透支；当 `consumedHours` 超过剩余课时时返回明确错误。
+- 消课成功后生成 `transactionType=lesson_deduction` 的流水，`hoursChange=-consumedHours`，记录 `balanceBefore` 和 `balanceAfter`。
+- `remainingHours <= 5` 时标记低课时，可被订单课时页和 AI 教务助手查询。
+- 重复消课返回 `该上课记录已完成消课`。
+
+### GET /api/credits/accounts
+
+查询课时账户。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+|----------|------|------|------|
+| studentId | string | 否 | 按学员筛选 |
+| courseId | string | 否 | 按课程筛选 |
+| lowBalance | boolean | 否 | `true` 时只返回低课时账户 |
+| status | string | 否 | 账户状态，默认可用值 `active` |
+
+### GET /api/credits/accounts/:id
+
+返回单个课时账户，包含学员、课程、购买课时、已消耗课时、剩余课时、赠送课时、冻结课时、低课时状态。
+
+### GET /api/credits/transactions
+
+查询课时流水。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+|----------|------|------|------|
+| studentId | string | 否 | 按学员筛选 |
+| courseId | string | 否 | 按课程筛选 |
+| transactionType | string | 否 | 如 `lesson_deduction`、`purchase`、`gift`、`manual` |
+| startDate | string | 否 | 开始日期，`YYYY-MM-DD` |
+| endDate | string | 否 | 结束日期，`YYYY-MM-DD` |
+
+### POST /api/credits/adjust
+
+手动调整课时。仅管理员、教务主管、财务可操作。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| studentId | string | 是 | 学员 ID |
+| courseId | string | 否 | 课程 ID；存在时按课程账户调整 |
+| transactionType | string | 是 | 调整类型，如 `purchase`、`gift`、`manual`、`deduct` |
+| hoursChange | number | 是 | 课时变动，正数增加，负数扣减 |
+| note | string | 否 | 调整备注 |
+
+调整会更新 `credit_accounts`，并写入 `credit_transactions`，保存 `balanceBefore`、`balanceAfter`、`operatorId` 和备注。`operation_logs` 写入失败只记录 warning，不阻断主流程。
+
+## Sprint 3-4A 请假补课 API
+
+请假补课接口统一使用当前 token 中的 `organizationId` 做数据隔离，前端不得传 `organizationId`。
+
+### GET /api/leave-makeup
+
+查询请假、调课、取消课程和补课申请。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+|----------|------|------|------|
+| studentId | string | 否 | 按学员筛选 |
+| teacherId | string | 否 | 按老师筛选 |
+| courseId | string | 否 | 按课程筛选 |
+| classId | string | 否 | 按班级筛选 |
+| requestType | enum | 否 | `student_leave`、`teacher_leave`、`reschedule`、`cancellation`、`makeup` |
+| status | enum | 否 | `pending`、`approved`、`rejected`、`makeup_pending`、`makeup_scheduled`、`completed`、`parent_notified`、`cancelled` |
+| startDate | string | 否 | 原上课开始日期 |
+| endDate | string | 否 | 原上课结束日期 |
+
+### POST /api/leave-makeup
+
+创建申请。后端按 `scheduleId` 读取原排课，自动写入原课程、老师、学生/班级和原上课时间。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| scheduleId | string | 是 | 原排课 ID |
+| lessonRecordId | string | 否 | 已有关联上课记录 |
+| requestType | enum | 是 | 申请类型 |
+| reason | string | 是 | 申请原因 |
+| deductCredit | boolean | 否 | 是否扣课时，默认 false |
+| needMakeup | boolean | 否 | 是否需要补课，学生/老师请假默认 true |
+| newDate | string | 否 | 调课/补课新日期 |
+| newStartTime | string | 否 | 新开始时间 |
+| newEndTime | string | 否 | 新结束时间 |
+
+### PUT /api/leave-makeup/:id
+
+编辑申请原因、新时间、是否扣课时、是否需要补课等字段。`deductCredit` 变更会写入操作日志。
+
+### PATCH /api/leave-makeup/:id/status
+
+管理员、教务主管更新状态。拒绝时必须提供 `rejectReason`。
+
+### POST /api/leave-makeup/:id/approve
+
+审批通过。若 `needMakeup=true`，申请进入 `makeup_pending`，原排课标记为 `makeup_pending`；若课程取消或不需要补课，原排课标记为 `cancelled`。若 `deductCredit=true` 且原上课记录未消课，生成 `leave_deduction` 课时流水。
+
+### POST /api/leave-makeup/:id/reject
+
+拒绝申请，请求体必须包含 `rejectReason`。
+
+### POST /api/leave-makeup/:id/schedule-makeup
+
+安排补课，创建新的 `schedule`，并将申请状态更新为 `makeup_scheduled`。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| date | string | 是 | 补课日期 |
+| startTime | string | 是 | 开始时间 |
+| endTime | string | 是 | 结束时间 |
+| teacherId | string | 否 | 不传则沿用原老师 |
+| classroom | string | 否 | 教室文本 |
+| lessonType | enum | 否 | `class`、`exam`、`meeting` |
+| notes | string | 否 | 备注 |
+
+### POST /api/leave-makeup/:id/notify-parent
+
+模拟通知家长，设置 `parentNotified=true`，状态更新为 `parent_notified`。
+
+### 状态流转
+
+```text
+pending -> approved / rejected
+pending -> makeup_pending -> makeup_scheduled -> parent_notified -> completed
+pending -> cancelled
+```
+
+权限规则：管理员、教务主管可创建、审批、安排补课和通知；老师只能提交自己的老师请假并查看自己的申请；顾问只能为自己负责学员提交申请、查看状态和通知；财务当前无请假补课访问和操作权限，直接请求返回 403。
+
 ## 核心类型（`src/types/`）
 
 | 类型 | 文件 | 说明 |
@@ -110,7 +446,7 @@ Authorization: Bearer <token>
 | **页面** | `/schedule` — 排课管理 |
 | **操作** | 点击「新建排课」或点击日历格 → 填写表单 →「保存排课」 |
 | **Service** | `scheduleService.createSchedule(input, existingEvents)` |
-| **方法** | `POST /schedule/events` |
+| **方法** | `POST /api/schedules` |
 
 **请求字段**（与前端排课 Modal 一致）
 
@@ -118,7 +454,7 @@ Authorization: Bearer <token>
 |---------|----------|------|------|------|
 | courseId | courseName | string | 是 | 选择课程后解析为课程名称 |
 | teacherId | teacher | string | 是 | 选择教师后解析为教师姓名 |
-| roomId | roomId | string | 是 | `room-1` / `room-2` / `room-3` |
+| roomId / classroom | roomId / classroom | string | 否 | `roomId` 仅真实 UUID；否则只传 `classroom` 文本 |
 | date | date | string | 是 | 日期 YYYY-MM-DD |
 | startTime | startTime | string | 是 | 开始时间 HH:mm |
 | duration | duration | number | 是 | 时长（小时） |
@@ -153,9 +489,11 @@ Authorization: Bearer <token>
 | **页面** | `/schedule` — 排课管理 |
 | **操作** | 点击日历事件 → Drawer →「取消排课」 |
 | **Service** | `scheduleService.cancelSchedule(eventId, events)` |
-| **方法** | `DELETE /schedule/events/:id` |
+| **方法** | `PATCH /api/schedules/:id/status` |
 
-**返回** — 更新后的 `Schedule[]`
+**请求** — `{ "status": "cancelled", "cancelReason": "..." }`
+
+**返回** — 更新后的 `Schedule`
 
 ---
 
@@ -164,32 +502,29 @@ Authorization: Bearer <token>
 | 项目 | 内容 |
 |------|------|
 | **页面** | `/records` — 上课记录与消课 |
-| **操作** | 点击记录行 → Drawer →（可选）生成 AI 反馈 →「提交并确认消课」 |
-| **Service** | `lessonService.confirmDeduct()` / `lessonService.generateFeedback()` |
-| **方法** | `POST /lesson-records/:id/deduct` / `POST /lesson-records/:id/ai-feedback` |
+| **操作** | 点击记录行 → Drawer → 提交老师反馈后在「确认消课」区域二次确认 |
+| **Service** | `lessonService.confirmDeduction()` / `lessonService.generateFeedback()` |
+| **方法** | `POST /lesson-records/:id/confirm-deduction` |
 
 **消课请求字段**
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| aiSummary | string | 否 | AI 课后反馈摘要 |
+| consumedHours | number | 是 | 本次扣减课时 |
+| deductionNote | string | 否 | 消课备注 |
+| syncToParent | boolean | 否 | 是否同步给家长 |
 
 **消课返回字段**
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| student | Student | 扣减课时后的学员 |
-| record | LessonRecord | 状态更新后的上课记录 |
+| lessonRecord | LessonRecord | 状态更新后的上课记录 |
+| creditAccount | CreditAccount | 扣减后的课时账户 |
+| creditTransaction | CreditTransaction | 自动生成的课时流水 |
 
-**AI 反馈返回**
+**副作用** — `credit_accounts.remainingHours` 减少；`credit_transactions` 新增 `lesson_deduction` 流水；记录 `deductionStatus` → `deducted`、`status` → `completed`。重复调用返回 `该上课记录已完成消课`。
 
-```json
-{ "summary": "家长您好，今天..." }
-```
-
-**副作用** — 学员 `remainingCredits` 减少 `creditsConsumed`；记录 `status` → `completed`，`feedbackStatus` → `submitted`
-
----
+--- 
 
 ### 6. 课时调整
 
@@ -198,24 +533,25 @@ Authorization: Bearer <token>
 | **页面** | `/orders` — 订单与课时 |
 | **操作** | 点击「课时调整」→ 填写表单 →「确认调整」 |
 | **Service** | `creditService.adjustCredits()` |
-| **方法** | `POST /credit-transactions/adjust` |
+| **方法** | `POST /credits/adjust` |
 
 **请求字段**（与前端课时调整 Modal 一致）
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | studentId | string | 是 | 学员 ID |
-| adjustType | string | 是 | `purchase` \| `gift` \| `transfer_in` \| `makeup_return` \| `deduct` \| `refund` \| `transfer_out` \| `manual` |
-| creditsAmount | number | 是 | 变动课时数（非 0） |
-| courseName | string | 否 | 关联课程 |
+| courseId | string | 否 | 课程 ID |
+| transactionType | string | 是 | `purchase` \| `gift` \| `transfer_in` \| `makeup_return` \| `deduct` \| `refund` \| `transfer_out` \| `manual` |
+| hoursChange | number | 是 | 变动课时数（正增负减，非 0） |
 | amount | number | 否 | 关联金额 (¥) |
-| notes | string | 否 | 操作备注 |
+| note | string | 否 | 操作备注 |
 
 **返回字段**
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | student | Student | 更新后学员 |
+| creditAccount | CreditAccount | 调整后的课时账户 |
 | transaction | CreditTransaction | 新增流水记录 |
 
 ---
@@ -312,28 +648,39 @@ Authorization: Bearer <token>
 | 老师 | 自己的老师档案、课程、排课和上课记录 |
 | 财务 | 课时、流水和付款相关数据 |
 
-### 生成家长报告
+## Sprint 3-4B 家长报告 API
 
-| 项目 | 内容 |
-|------|------|
-| **页面** | `/reports` — 家长报告 |
-| **操作** | 点击「生成 AI 摘要」 |
-| **Service** | `reportService.generateParentReportSummary()` |
-| **方法** | `POST /reports/parent/summary` |
+家长报告接口统一使用 token 中的 `organizationId` 做数据隔离，前端不得传 `organizationId`。报告内容面向家长，不返回 `internalNotes` 给家长预览，不暴露 `operation_logs` 或非授权财务敏感字段。
 
-**请求** `{ "studentId": "S001" }`（可选）
+### GET /api/reports
 
-**返回** `{ "summary": "子涵家长您好！..." }`
+支持筛选：`studentId`、`courseId`、`advisorId`、`reportType`、`status`、`startDate`、`endDate`。
 
-### 获取家长报告数据
+### GET /api/reports/:id
 
-| 项目 | 内容 |
-|------|------|
-| **页面** | `/reports` |
-| **Service** | `reportService.getParentReport()` |
-| **方法** | `GET /reports/parent/:studentId` |
+获取报告详情。管理员、教务主管可查看全部；顾问仅负责学员；老师仅可查看与自己课程相关报告摘要；财务不可访问。
 
-**返回** — `ParentReport`
+### POST /api/reports/generate
+
+生成家长报告。
+
+请求字段：`studentId`、`courseId?`、`reportType`、`reportPeriodStart`、`reportPeriodEnd`、`includeLessons?`、`includeCredits?`、`includeLeaveMakeup?`、`includeHomework?`、`includeAiSummary?`。
+
+后端聚合 `lesson_records`、`credit_accounts`、`credit_transactions`、`leave_makeup_requests`，并用 mock 规则生成中文 `aiSummary`、`parentVisibleContent`、课时摘要、请假补课摘要和下阶段计划。
+
+### PUT /api/reports/:id
+
+编辑报告。可编辑：`title`、`summary`、`teacherFeedbackSummary`、`weaknessAnalysis`、`nextStepPlan`、`aiSummary`、`parentVisibleContent`、`internalNotes`。`draft`、`generated`、`reviewed` 可编辑；`sent` 仅管理员可编辑。
+
+### POST /api/reports/:id/send
+
+模拟发送报告给家长，设置 `status=sent`、`sentAt`、`sentBy`、`sentChannel`，并写入 `operation_logs`。
+
+### PATCH /api/reports/:id/status
+
+管理员、教务主管更新报告状态。状态枚举：`draft`、`generated`、`reviewed`、`sent`、`archived`。
+
+报告类型枚举：`weekly`、`monthly`、`stage`、`custom`。
 
 ### AI 助手查询
 
@@ -379,7 +726,7 @@ Authorization: Bearer <token>
 | GET | `/lesson-records` | `lessonService.listRecords()` | 上课记录 |
 | GET | `/leaves` | `lessonService.listLeaves()` | 请假补课 |
 | GET | `/assessments` | `lessonService.listAssessments()` | 作业测评 |
-| GET | `/credit-transactions` | `creditService.listTransactions()` | 订单与课时 |
+| GET | `/credits/transactions` | `creditService.listTransactions()` | 订单与课时 |
 | GET | `/reports/trend` | `reportService.getTrendData()` | 家长报告 |
 | GET | `/reports/radar` | `reportService.getRadarData()` | 家长报告 |
 | GET | `/dashboard/chart` | `reportService.getDashboardChart()` | 数据看板 |

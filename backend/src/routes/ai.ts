@@ -32,8 +32,8 @@ aiRouter.post(
 
     if (intent === AiQueryIntent.CREDIT_WARNING) {
       const students = await prisma.student.findMany({
-        where: { organizationId: req.user.organizationId, creditAccount: { balance: { lte: 5 } }, deletedAt: null },
-        include: { creditAccount: true },
+        where: { organizationId: req.user.organizationId, creditAccounts: { some: { balance: { lte: 5 } } }, deletedAt: null },
+        include: { creditAccounts: true },
         orderBy: { createdAt: "desc" },
       });
       result = { intent: "credit_warning", students: students.map(toStudent) };
@@ -80,11 +80,11 @@ aiRouter.post(
     } else if (intent === AiQueryIntent.REPORT) {
       const student = await prisma.student.findFirst({
         where: { organizationId: req.user.organizationId },
-        include: { creditAccount: true },
+        include: { creditAccounts: true },
         orderBy: { updatedAt: "desc" },
       });
       const summary = student
-        ? `${student.name}本阶段学习状态稳定，剩余课时 ${student.creditAccount?.balance ?? 0}，建议持续关注作业完成情况。`
+        ? `${student.name}本阶段学习状态稳定，剩余课时 ${student.creditAccounts.reduce((sum, account) => sum + account.balance.toNumber(), 0)}，建议持续关注作业完成情况。`
         : "暂无学员数据，无法生成报告摘要。";
       result = { intent: "report", summary };
       reply = summary;

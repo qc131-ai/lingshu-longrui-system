@@ -63,9 +63,11 @@ erDiagram
     classes ||--o{ lesson_records : "class_id"
     students ||--o{ lesson_records : "student_id"
     teachers ||--o{ lesson_records : "teacher_id"
-    students ||--|| credit_accounts : "student_id"
+    students ||--o{ credit_accounts : "student_id"
+    courses ||--o{ credit_accounts : "course_id"
     credit_accounts ||--o{ credit_transactions : "account_id"
     students ||--o{ credit_transactions : "student_id"
+    courses ||--o{ credit_transactions : "course_id"
     lesson_records ||--o| credit_transactions : "lesson_record_id"
     students ||--o{ parent_reports : "student_id"
     users ||--o{ ai_messages : "user_id"
@@ -116,22 +118,25 @@ erDiagram
 
 | 枚举名 | 值 | 说明 |
 |--------|-----|------|
-| `lesson_attendance` | `present`, `absent`, `student_leave`, `teacher_leave` | 出勤 |
-| `lesson_status` | `scheduled`, `completed`, `cancelled`, `need_makeup` | 上课状态 |
+| `lesson_status` | `draft`, `pending_feedback`, `submitted`, `completed`, `cancelled` | 上课记录状态 |
 | `lesson_feedback_status` | `pending`, `submitted` | 反馈提交状态 |
+| `lesson_deduction_status` | `pending`, `deducted` | 消课状态 |
 
 ### 3.7 课时流水
 
 | 枚举名 | 值 | 说明 |
 |--------|-----|------|
-| `credit_adjust_type` | `purchase`, `gift`, `transfer_in`, `makeup_return`, `deduct`, `refund`, `transfer_out`, `manual`, `lesson_deduct` | 变动类型（`lesson_deduct` 为消课自动产生） |
+| `leave_request_type` | `student_leave`, `teacher_leave`, `reschedule`, `cancellation`, `makeup` | 请假补课申请类型 |
+| `leave_request_status` | `pending`, `approved`, `rejected`, `makeup_pending`, `makeup_scheduled`, `completed`, `parent_notified`, `cancelled` | 请假补课状态 |
+| `credit_adjust_type` | `purchase`, `gift`, `transfer_in`, `makeup_return`, `deduct`, `refund`, `transfer_out`, `manual`, `lesson_deduct`, `leave_deduction` | 变动类型（`lesson_deduct` 为消课自动产生，`leave_deduction` 为请假扣课时） |
 | `credit_transaction_status` | `paid`, `pending`, `refunded` | 订单/流水状态 |
 
 ### 3.8 家长报告
 
 | 枚举名 | 值 | 说明 |
 |--------|-----|------|
-| `parent_report_status` | `draft`, `generated`, `sent` | 报告状态 |
+| `parent_report_type` | `weekly`, `monthly`, `stage`, `custom` | 报告类型 |
+| `parent_report_status` | `draft`, `generated`, `reviewed`, `sent`, `archived` | 报告状态 |
 
 ### 3.9 AI
 
@@ -378,44 +383,92 @@ erDiagram
 | `sync_to_parent` | `BOOLEAN` | | 否 | 同步给家长 |
 | `deducted_at` | `TIMESTAMPTZ` | | 否 | 消课确认时间 |
 | `deduct_transaction_id` | `UUID` | FK → `credit_transactions.id` | 否 | 关联消课流水 |
+| `deduction_status` | `lesson_deduction_status` | | 是 | 默认 `pending`，确认消课后为 `deducted` |
 | `created_at` | `TIMESTAMPTZ` | | 是 | |
 | `updated_at` | `TIMESTAMPTZ` | | 是 | |
 
 | 项目 | 内容 |
 |------|------|
 | **对应前端页面** | `/records`（上课记录与消课） |
-| **API 映射** | `GET /lesson-records`、`PATCH /lesson-records/:id`、`POST /lesson-records/:id/deduct`、`POST /lesson-records/:id/ai-feedback` |
+| **API 映射** | `GET /lesson-records`、`PATCH /lesson-records/:id/status`、`POST /lesson-records/:id/confirm-deduction` |
 | **API 冗余返回** | `studentName`、`className`、`teacherName` 由 JOIN 生成 |
 | **第一阶段必做** | **是** |
 | **后续可扩展** | `attachments`（JSONB 课件/作业）、`parent_read_at`、`rating_by_parent` |
 
 ---
 
-### 4.10 `credit_accounts` — 课时账户
+### 4.10 `leave_makeup_requests` — 请假补课申请
 
-> 每个学员至少一条账户记录；MVP 可先按「学员总账户」设计，后续可按课程拆分子账户。
+| 字段 | 类型 | 主键/外键 | 必填 | 说明 |
+|------|------|-----------|------|------|
+| `id` | `UUID` | PK | 是 | 申请 ID |
+| `organization_id` | `UUID` | FK → `organizations.id` | 是 | 机构隔离字段 |
+| `schedule_id` | `UUID` | FK → `schedules.id` | 是 | 原排课 |
+| `lesson_record_id` | `UUID` | FK → `lesson_records.id` | 否 | 关联上课记录 |
+| `student_id` | `UUID` | FK → `students.id` | 否 | 学员 |
+| `class_id` | `UUID` | FK → `classes.id` | 否 | 班级 |
+| `course_id` | `UUID` | FK → `courses.id` | 是 | 课程 |
+| `teacher_id` | `UUID` | FK → `teachers.id` | 是 | 老师 |
+| `request_type` | `leave_request_type` | | 是 | 学生请假、老师请假、调课、取消、补课 |
+| `original_date` | `DATE` | | 是 | 原上课日期 |
+| `original_start_time` | `TIME` | | 是 | 原开始时间 |
+| `original_end_time` | `TIME` | | 是 | 原结束时间 |
+| `new_date` | `DATE` | | 否 | 新上课日期 |
+| `new_start_time` | `TIME` | | 否 | 新开始时间 |
+| `new_end_time` | `TIME` | | 否 | 新结束时间 |
+| `reason` | `TEXT` | | 是 | 申请原因 |
+| `deduct_credit` | `BOOLEAN` | | 是 | 是否扣课时 |
+| `need_makeup` | `BOOLEAN` | | 是 | 是否需要补课 |
+| `status` | `leave_request_status` | | 是 | 默认 `pending` |
+| `approval_note` | `TEXT` | | 否 | 审批备注 |
+| `reject_reason` | `TEXT` | | 否 | 拒绝原因 |
+| `parent_notified` | `BOOLEAN` | | 是 | 是否已通知家长 |
+| `makeup_schedule_id` | `UUID` | FK → `schedules.id` | 否 | 新补课排课 |
+| `created_by` | `UUID` | FK → `users.id` | 否 | 创建人 |
+| `approved_by` | `UUID` | FK → `users.id` | 否 | 审批人 |
+| `approved_at` | `TIMESTAMPTZ` | | 否 | 审批时间 |
+| `created_at` | `TIMESTAMPTZ` | | 是 | 创建时间 |
+| `updated_at` | `TIMESTAMPTZ` | | 是 | 最近更新时间 |
+
+| 项目 | 内容 |
+|------|------|
+| **对应前端页面** | `/leaves`（请假补课）和 `/schedule` 排课详情快捷入口 |
+| **API 映射** | `GET /leave-makeup`、`GET /leave-makeup/:id`、`POST /leave-makeup`、`PUT /leave-makeup/:id`、`PATCH /leave-makeup/:id/status`、`POST /leave-makeup/:id/approve`、`POST /leave-makeup/:id/reject`、`POST /leave-makeup/:id/schedule-makeup`、`POST /leave-makeup/:id/notify-parent` |
+| **课时规则** | `deduct_credit=false` 不扣课时；`deduct_credit=true` 且未消课时写入 `credit_transactions.adjust_type=leave_deduction` |
+
+---
+
+### 4.11 `credit_accounts` — 课时账户
+
+> Sprint 3-3 以「学员 + 课程」为课时账户业务维度。确认消课时必须能找到当前学员对应课程的账户；找不到时返回明确错误，不静默创建错误账户。
 
 | 字段 | 类型 | 主键/外键 | 必填 | 说明 |
 |------|------|-----------|------|------|
 | `id` | `UUID` | PK | 是 | 账户 ID |
-| `student_id` | `UUID` | FK → `students.id` UNIQUE | 是 | 学员（MVP 一对一） |
-| `balance` | `DECIMAL(10,2)` | | 是 | 当前剩余课时 |
-| `total_purchased` | `DECIMAL(10,2)` | | 是 | 累计购买课时，默认 0 |
-| `total_consumed` | `DECIMAL(10,2)` | | 是 | 累计消耗课时，默认 0 |
-| `total_gifted` | `DECIMAL(10,2)` | | 是 | 累计赠送，默认 0 |
+| `organization_id` | `UUID` | FK → `organizations.id` | 是 | 机构隔离字段 |
+| `student_id` | `UUID` | FK → `students.id` | 是 | 学员 |
+| `course_id` | `UUID` | FK → `courses.id` | 否 | 课程；新业务应按课程写入 |
+| `balance` | `DECIMAL(10,2)` | | 是 | 当前剩余课时，对应 API `remainingHours` |
+| `total_purchased` | `DECIMAL(10,2)` | | 是 | 累计购买课时，对应 API `totalPurchasedHours` |
+| `total_consumed` | `DECIMAL(10,2)` | | 是 | 累计消耗课时，对应 API `totalConsumedHours` |
+| `total_gifted` | `DECIMAL(10,2)` | | 是 | 累计赠送，对应 API `giftedHours` |
+| `frozen_hours` | `DECIMAL(10,2)` | | 是 | 冻结课时，默认 0 |
+| `low_balance` | `BOOLEAN` | | 是 | 低课时标记，`remainingHours <= 5` 时置为 true |
+| `status` | `VARCHAR(20)` | | 是 | 账户状态，默认 `active` |
 | `version` | `INTEGER` | | 是 | 乐观锁版本号 |
+| `created_at` | `TIMESTAMPTZ` | | 是 | |
 | `updated_at` | `TIMESTAMPTZ` | | 是 | |
 
 | 项目 | 内容 |
 |------|------|
 | **对应前端页面** | `/students`（剩余课时）、`/orders`（台账摘要） |
-| **API 映射** | 随 `GET /students` 返回 `remainingCredits`；`GET /credit-transactions/ledger` |
+| **API 映射** | `GET /credits/accounts`、`GET /credits/accounts/:id`；随学员接口可汇总返回 `remainingCredits` |
 | **第一阶段必做** | **是** |
-| **后续可扩展** | `course_id`（分课程子账户）、`expire_at`、`low_balance_threshold` |
+| **后续可扩展** | `expire_at`、`low_balance_threshold`、课程包/订单来源 |
 
 ---
 
-### 4.11 `credit_transactions` — 课时流水 / 订单
+### 4.12 `credit_transactions` — 课时流水 / 订单
 
 | 字段 | 类型 | 主键/外键 | 必填 | 说明 |
 |------|------|-----------|------|------|
@@ -426,6 +479,7 @@ erDiagram
 | `lesson_record_id` | `UUID` | FK → `lesson_records.id` | 否 | 消课来源记录 |
 | `adjust_type` | `credit_adjust_type` | | 是 | 变动类型 |
 | `credits_delta` | `DECIMAL(10,2)` | | 是 | 课时变动（正增负减） |
+| `balance_before` | `DECIMAL(10,2)` | | 是 | 变动前余额 |
 | `balance_after` | `DECIMAL(10,2)` | | 是 | 变动后余额 |
 | `amount` | `DECIMAL(12,2)` | | 是 | 关联金额，默认 0 |
 | `status` | `credit_transaction_status` | | 是 | 默认 `paid` |
@@ -439,20 +493,35 @@ erDiagram
 | 项目 | 内容 |
 |------|------|
 | **对应前端页面** | `/orders`（订单与课时）、`/finance`（财务概览） |
-| **API 映射** | `GET /credit-transactions`、`POST /credit-transactions/adjust` |
-| **前端字段映射** | `creditsAdded`：正数写入 `credits_delta`；消课写入负 `credits_delta` 且 `adjust_type=lesson_deduct` |
+| **API 映射** | `GET /credits/transactions`、`POST /credits/adjust` |
+| **前端字段映射** | `hoursChange`：写入 `credits_delta`；消课写入负数且 `adjust_type=lesson_deduct`，API 对外映射为 `transactionType=lesson_deduction` |
 | **第一阶段必做** | **是** |
 | **后续可扩展** | `payment_channel`、`invoice_no`、`refund_of_transaction_id`、`contract_id` |
 
 ---
 
-### 4.12 `parent_reports` — 家长报告
+### 4.13 `parent_reports` — 家长报告
 
 | 字段 | 类型 | 主键/外键 | 必填 | 说明 |
 |------|------|-----------|------|------|
 | `id` | `UUID` | PK | 是 | 报告 ID |
 | `student_id` | `UUID` | FK → `students.id` | 是 | 学员 |
+| `course_id` | `UUID` | FK → `courses.id` | 否 | 课程维度报告 |
 | `advisor_id` | `UUID` | FK → `users.id` | 否 | 负责顾问 |
+| `report_type` | `parent_report_type` | | 是 | `weekly` / `monthly` / `stage` / `custom` |
+| `title` | `VARCHAR(200)` | | 是 | 报告标题 |
+| `summary` | `TEXT` | | 否 | 阶段总结 |
+| `course_progress` | `TEXT` | | 否 | 课程进度 |
+| `lesson_summary` | `TEXT` | | 否 | 上课记录摘要 |
+| `teacher_feedback_summary` | `TEXT` | | 否 | 老师反馈摘要 |
+| `homework_summary` | `TEXT` | | 否 | 作业摘要 |
+| `attendance_summary` | `TEXT` | | 否 | 出勤摘要 |
+| `credit_summary` | `TEXT` | | 否 | 课时摘要 |
+| `leave_makeup_summary` | `TEXT` | | 否 | 请假补课摘要 |
+| `weakness_analysis` | `TEXT` | | 否 | 薄弱点分析 |
+| `next_step_plan` | `TEXT` | | 否 | 下阶段计划 |
+| `internal_notes` | `TEXT` | | 否 | 内部备注，不展示给家长 |
+| `parent_visible_content` | `TEXT` | | 否 | 家长可见正文 |
 | `period_label` | `VARCHAR(100)` | | 是 | 报告周期文案，如 `2024年3月` |
 | `period_start` | `DATE` | | 是 | 周期开始 |
 | `period_end` | `DATE` | | 是 | 周期结束 |
@@ -469,6 +538,7 @@ erDiagram
 | `radar_data` | `JSONB` | | 否 | 雷达图数据 |
 | `status` | `parent_report_status` | | 是 | 默认 `draft` |
 | `sent_at` | `TIMESTAMPTZ` | | 否 | 发送时间 |
+| `sent_by` | `UUID` | FK → `users.id` | 否 | 发送人 |
 | `sent_channel` | `VARCHAR(50)` | | 否 | `wecom` / `sms` / `email` |
 | `generated_at` | `TIMESTAMPTZ` | | 否 | 生成时间 |
 | `created_by` | `UUID` | FK → `users.id` | 否 | |
@@ -476,6 +546,12 @@ erDiagram
 | `updated_at` | `TIMESTAMPTZ` | | 是 | |
 
 **`course_records` JSONB 元素结构**（对齐 `ParentReportCourseRecord`）：
+
+| 项目 | 内容 |
+|------|------|
+| **API 映射** | `GET /reports`、`GET /reports/:id`、`POST /reports/generate`、`PUT /reports/:id`、`POST /reports/:id/send`、`PATCH /reports/:id/status` |
+| **生成关系** | 聚合 `lesson_records`、`credit_accounts`、`credit_transactions`、`leave_makeup_requests`，保存周期快照 |
+| **家长可见控制** | 前端预览使用 `parent_visible_content`、摘要和统计字段；不展示 `internal_notes`、`operation_logs` 或敏感财务明细 |
 
 ```json
 { "date": "2024-03-20", "course": "AP微积分", "topic": "级数", "teacher": "王老师", "feedback": "..." }
@@ -490,7 +566,7 @@ erDiagram
 
 ---
 
-### 4.13 `ai_messages` — AI 对话消息
+### 4.14 `ai_messages` — AI 对话消息
 
 | 字段 | 类型 | 主键/外键 | 必填 | 说明 |
 |------|------|-----------|------|------|
@@ -513,7 +589,7 @@ erDiagram
 
 ---
 
-### 4.14 `ai_tasks` — AI 异步任务
+### 4.15 `ai_tasks` — AI 异步任务
 
 | 字段 | 类型 | 主键/外键 | 必填 | 说明 |
 |------|------|-----------|------|------|
@@ -572,9 +648,12 @@ schedules INSERT（校验教师/教室时间冲突）
 lesson_records UPDATE（topic, performance, homework, feedback_status）
   → ai_tasks INSERT（可选，lesson_feedback）
   → 消课事务：
-      credit_accounts UPDATE（balance -= credits_consumed，version++）
-      credit_transactions INSERT（adjust_type = lesson_deduct）
-      lesson_records UPDATE（status = completed, deducted_at）
+      校验 lesson_records.status IN (submitted, completed)
+      校验 deduction_status != deducted
+      查询 credit_accounts（organization_id + student_id + course_id）
+      credit_accounts UPDATE（balance -= consumed_hours, total_consumed += consumed_hours, low_balance, version++）
+      credit_transactions INSERT（adjust_type = lesson_deduct, balance_before, balance_after）
+      lesson_records UPDATE（status = completed, deduction_status = deducted, deducted_at, deduct_transaction_id）
 ```
 
 ### 5.4 课时调整
@@ -613,6 +692,7 @@ ai_messages INSERT（user 提问）
 | 教师管理 | `/teachers` | `teachers` | `teachers` |
 | 排课管理 | `/schedule` | `schedules`, `courses`, `teachers`, `rooms` | `schedules` |
 | 上课记录与消课 | `/records` | `lesson_records`, `students`, `teachers`, `classes` | `lesson_records`, `credit_accounts`, `credit_transactions`, `ai_tasks` |
+| 请假补课 | `/leaves` | `leave_makeup_requests`, `schedules`, `students`, `classes`, `teachers` | `leave_makeup_requests`, `schedules`, `credit_transactions` |
 | 订单与课时 | `/orders` | `credit_transactions`, `credit_accounts`, `students` | `credit_transactions`, `credit_accounts`, `ai_tasks` |
 | 家长报告 | `/reports` | `parent_reports`, `students` | `parent_reports`, `ai_tasks` |
 | AI 智能助理 | `/ai` | `ai_messages`, `students`, `credit_accounts` | `ai_messages` |
@@ -624,7 +704,7 @@ ai_messages INSERT（user 提问）
 
 | 优先级 | 表 | 说明 |
 |--------|-----|------|
-| **P0** | `users`, `students`, `courses`, `teachers`, `classes`, `class_enrollments`, `rooms`, `schedules`, `lesson_records`, `credit_accounts`, `credit_transactions` | 核心教务闭环 |
+| **P0** | `users`, `students`, `courses`, `teachers`, `classes`, `class_enrollments`, `rooms`, `schedules`, `lesson_records`, `credit_accounts`, `credit_transactions`, `leave_makeup_requests` | 核心教务闭环和请假补课异常流程 |
 | **P0** | `ai_tasks` | 消课 AI 反馈可同步返回，但建议仍落任务表便于审计 |
 | **P1** | `parent_reports`, `ai_messages` | 报告与助手；可先用简化实现 |
 
@@ -634,7 +714,7 @@ ai_messages INSERT（user 提问）
 
 | 表名 | 说明 | 前端类型 |
 |------|------|----------|
-| `leave_records` | 请假补课 | `LeaveRecord` |
+| `leave_records` | 旧请假补课兼容表，新流程使用 `leave_makeup_requests` | `LeaveRecord` |
 | `assessments` | 作业测评 | `Assessment` |
 | `competitions` | 竞赛管理 | `Competition` |
 | `student_contacts` | 家长多联系人 | — |
@@ -653,7 +733,7 @@ ai_messages INSERT（user 提问）
 | `schedules` | `(lesson_date, teacher_id)`, `(lesson_date, room_id)`, `(class_id)`, `(status)` |
 | `lesson_records` | `(student_id, lesson_date)`, `(teacher_id, lesson_date)`, `(status)`, `(feedback_status)` |
 | `credit_transactions` | `(student_id, transaction_date DESC)`, `(account_id)`, `(adjust_type)` |
-| `credit_accounts` | `(student_id)` UNIQUE |
+| `credit_accounts` | `(student_id, course_id)` UNIQUE、`(student_id)`、`(course_id)` |
 | `parent_reports` | `(student_id, period_end DESC)` |
 | `ai_messages` | `(user_id, session_id, created_at)` |
 | `ai_tasks` | `(status, task_type)`, `(student_id)` |

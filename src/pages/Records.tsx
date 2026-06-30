@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, Filter, Calendar as CalendarIcon, Clock, CheckCircle2, AlertCircle, MessageSquare, ChevronRight, X, Sparkles, Save, Send } from 'lucide-react';
-import { LessonRecord } from '../types';
+import type { CreditAccount, LessonRecord, LessonRecordStatus } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { Drawer } from '../components/ui/Drawer';
 import { lessonService } from '../services/lessonService';
+import { creditService } from '../services/creditService';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { can } from '../auth/permissions';
@@ -11,21 +12,69 @@ import { can } from '../auth/permissions';
 const recordsPageStats = lessonService.getRecordsPageStatsSync();
 
 export function Records() {
-  const { lessonRecords, updateLessonRecord, students, updateStudent } = useAppContext();
+  const { courses, teachers } = useAppContext();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
+  const [records, setRecords] = useState<LessonRecord[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<LessonRecord | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [creditAccount, setCreditAccount] = useState<CreditAccount | null>(null);
+  const [deductionHours, setDeductionHours] = useState(0);
+  const [deductionNote, setDeductionNote] = useState('');
+  const [filters, setFilters] = useState({
+    startDate: '',
+    endDate: '',
+    teacherId: '',
+    courseId: '',
+    status: '' as LessonRecordStatus | '',
+  });
+  const [feedbackForm, setFeedbackForm] = useState({
+    topic: '',
+    performance: '',
+    knowledgeMastery: '',
+    homework: '',
+    nextPlan: '',
+    needAdvisorFollowUp: false,
+    syncToParent: true,
+    internalNotes: '',
+  });
   
   // AI summary state
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [aiSummary, setAiSummary] = useState('');
 
-  const filteredRecords = lessonRecords.filter(r => 
-    r.studentName.includes(searchTerm) || r.className.includes(searchTerm)
-  );
+  const filteredRecords = useMemo(() => records, [records]);
+
+  const refreshRecords = async () => {
+    setIsLoading(true);
+    try {
+      const latest = await lessonService.listRecords({
+        ...filters,
+        search: searchTerm,
+      });
+      setRecords(latest);
+    } catch (error) {
+      toast.error(`上课记录加载失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshRecords();
+  }, [filters.startDate, filters.endDate, filters.teacherId, filters.courseId, filters.status]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(refreshRecords, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm]);
 
   const getStatusBadge = (status: string) => {
     switch(status) {
+      case 'draft': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">草稿</span>;
+      case 'pending_feedback': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-700">待提交反馈</span>;
+      case 'submitted': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-700">已提交</span>;
       case 'completed': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">已完成</span>;
       case 'scheduled': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">未开始</span>;
       case 'cancelled': return <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">已取消</span>;
@@ -48,36 +97,87 @@ export function Records() {
     if (!selectedRecord) return;
     setIsGeneratingAI(true);
     try {
-      const summary = await lessonService.generateFeedback(selectedRecord);
+      const summary = await lessonService.generateFeedback({ ...selectedRecord, ...feedbackForm });
       setAiSummary(summary);
+      const updated = await lessonService.updateRecord(selectedRecord.id, { aiSummary: summary });
+      setSelectedRecord(updated);
+      setRecords(prev => prev.map(item => item.id === updated.id ? updated : item));
       toast.success('AI 反馈已生成');
     } finally {
       setIsGeneratingAI(false);
     }
   };
 
-  const handleConfirmDeduct = async () => {
+  const loadCreditAccount = async (record: LessonRecord) => {
+    setCreditAccount(null);
+    setDeductionHours(record.duration ?? record.creditsConsumed ?? 0);
+    if (!record.studentId || !record.courseId) return;
+    try {
+      const accounts = await creditService.listAccounts({ studentId: record.studentId, courseId: record.courseId });
+      setCreditAccount(accounts[0] ?? null);
+    } catch {
+      setCreditAccount(null);
+    }
+  };
+
+  const buildFeedbackPayload = () => ({
+    ...feedbackForm,
+    aiSummary: aiSummary || selectedRecord?.aiSummary,
+  });
+
+  const handleSaveDraft = async () => {
     if (!selectedRecord) return;
-    
-    if (confirm('确认扣除本次课时吗？该操作将减少学生剩余课时。')) {
-      const student = students.find(s => s.id === selectedRecord.studentId);
-      if (!student) return;
+    setIsSaving(true);
+    try {
+      const updated = await lessonService.saveDraft(selectedRecord.id, buildFeedbackPayload());
+      setSelectedRecord(updated);
+      setRecords(prev => prev.map(item => item.id === updated.id ? updated : item));
+      toast.success('草稿已保存');
+    } catch (error) {
+      toast.error(`保存草稿失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
-      const result = await lessonService.confirmDeduct({
-        record: selectedRecord,
-        student,
-        aiSummary: aiSummary || undefined,
-      });
+  const handleSubmitFeedback = async () => {
+    if (!selectedRecord) return;
+    if (!feedbackForm.topic.trim() || !feedbackForm.performance.trim() || !feedbackForm.homework.trim()) {
+      toast.error('请填写本节课内容、学生课堂表现和作业布置');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const updated = await lessonService.submitFeedback(selectedRecord.id, buildFeedbackPayload());
+      setSelectedRecord(updated);
+      setRecords(prev => prev.map(item => item.id === updated.id ? updated : item));
+      toast.success('反馈已提交');
+    } catch (error) {
+      toast.error(`提交反馈失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
-      updateStudent(result.student.id, { remainingCredits: result.student.remainingCredits });
-      updateLessonRecord(result.record.id, {
-        status: result.record.status,
-        feedbackStatus: result.record.feedbackStatus,
-        aiSummary: result.record.aiSummary,
+  const handleConfirmDeduction = async () => {
+    if (!selectedRecord) return;
+    const balance = creditAccount?.remainingHours ?? 0;
+    if (!window.confirm(`确认扣减 ${deductionHours} 课时？扣减后余额为 ${balance - deductionHours} 课时。`)) return;
+    setIsSaving(true);
+    try {
+      const result = await lessonService.confirmDeduction(selectedRecord.id, {
+        consumedHours: deductionHours,
+        deductionNote,
+        syncToParent: feedbackForm.syncToParent,
       });
-      
-      toast.success('消课成功，学生课时已扣除');
-      setSelectedRecord(null);
+      setSelectedRecord(result.lessonRecord);
+      setCreditAccount(result.creditAccount as CreditAccount);
+      setRecords(prev => prev.map(item => item.id === result.lessonRecord.id ? result.lessonRecord : item));
+      toast.success('消课成功，课时流水已生成');
+    } catch (error) {
+      toast.error(`确认消课失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -153,14 +253,24 @@ export function Records() {
             />
           </div>
           <div className="flex gap-2 w-full sm:w-auto">
-             <button className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 w-full sm:w-auto justify-center">
-              <CalendarIcon className="w-4 h-4" />
-              日期范围
-            </button>
-            <button className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 w-full sm:w-auto justify-center">
-              <Filter className="w-4 h-4" />
-              状态筛选
-            </button>
+            <input type="date" value={filters.startDate} onChange={e => setFilters({ ...filters, startDate: e.target.value })} className="px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg" />
+            <input type="date" value={filters.endDate} onChange={e => setFilters({ ...filters, endDate: e.target.value })} className="px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg" />
+            <select value={filters.teacherId} onChange={e => setFilters({ ...filters, teacherId: e.target.value })} className="px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg">
+              <option value="">全部老师</option>
+              {teachers.map(teacher => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}
+            </select>
+            <select value={filters.courseId} onChange={e => setFilters({ ...filters, courseId: e.target.value })} className="px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg">
+              <option value="">全部课程</option>
+              {courses.map(course => <option key={course.id} value={course.id}>{course.name}</option>)}
+            </select>
+            <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value as LessonRecordStatus | '' })} className="px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg">
+              <option value="">全部状态</option>
+              <option value="draft">草稿</option>
+              <option value="pending_feedback">待提交反馈</option>
+              <option value="submitted">已提交</option>
+              <option value="completed">已完成</option>
+              <option value="cancelled">已取消</option>
+            </select>
           </div>
         </div>
 
@@ -169,12 +279,14 @@ export function Records() {
           <table className="w-full text-sm text-left text-gray-500">
             <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b border-gray-200">
               <tr>
-                <th scope="col" className="px-6 py-4">上课时间</th>
-                <th scope="col" className="px-6 py-4">学生/课程</th>
+                <th scope="col" className="px-6 py-4">上课日期</th>
+                <th scope="col" className="px-6 py-4">时间</th>
+                <th scope="col" className="px-6 py-4">学员/班级</th>
+                <th scope="col" className="px-6 py-4">课程</th>
                 <th scope="col" className="px-6 py-4">授课老师</th>
-                <th scope="col" className="px-6 py-4">状态/出勤</th>
-                <th scope="col" className="px-6 py-4">课时消耗</th>
+                <th scope="col" className="px-6 py-4">状态</th>
                 <th scope="col" className="px-6 py-4">反馈状态</th>
+                <th scope="col" className="px-6 py-4">本节课时</th>
                 <th scope="col" className="px-6 py-4 text-right">操作</th>
               </tr>
             </thead>
@@ -186,14 +298,31 @@ export function Records() {
                   onClick={() => {
                     setSelectedRecord(record);
                     setAiSummary(record.aiSummary || '');
+                    setFeedbackForm({
+                      topic: record.topic || '',
+                      performance: record.performance || '',
+                      knowledgeMastery: record.knowledgeMastery || '',
+                      homework: record.homework || '',
+                      nextPlan: record.nextPlan || '',
+                      needAdvisorFollowUp: Boolean(record.needAdvisorFollowUp),
+                      syncToParent: record.syncToParent ?? true,
+                      internalNotes: record.internalNotes || '',
+                    });
+                    loadCreditAccount(record);
                   }}
                 >
                   <td className="px-6 py-4 font-medium text-gray-900">
                     {record.date}
                   </td>
+                  <td className="px-6 py-4 text-gray-700">
+                    {record.timeString || `${record.startTime ?? ''} - ${record.endTime ?? ''}`}
+                  </td>
                   <td className="px-6 py-4">
-                    <div className="font-medium text-gray-900">{record.studentName}</div>
-                    <div className="text-xs text-gray-500">{record.className}</div>
+                    <div className="font-medium text-gray-900">{record.studentName || record.className || '-'}</div>
+                    <div className="text-xs text-gray-500">{record.studentName ? record.className : '班级记录'}</div>
+                  </td>
+                  <td className="px-6 py-4 text-gray-700">
+                    {record.courseName || '-'}
                   </td>
                   <td className="px-6 py-4 text-gray-700">
                     {record.teacherName}
@@ -201,17 +330,7 @@ export function Records() {
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1 items-start">
                       {getStatusBadge(record.status)}
-                      <span className="text-xs font-medium">
-                        {getAttendanceBadge(record.attendance)}
-                      </span>
                     </div>
-                  </td>
-                  <td className="px-6 py-4 font-medium text-gray-900">
-                    {record.creditsConsumed > 0 ? (
-                      <span className="text-red-600">-{record.creditsConsumed}</span>
-                    ) : (
-                      <span className="text-gray-400">-</span>
-                    )}
                   </td>
                   <td className="px-6 py-4">
                     {record.feedbackStatus === 'submitted' ? (
@@ -219,6 +338,9 @@ export function Records() {
                     ) : (
                       <span className="flex items-center text-orange-500 text-xs font-medium"><AlertCircle className="w-3.5 h-3.5 mr-1" />待提交</span>
                     )}
+                  </td>
+                  <td className="px-6 py-4 font-medium text-gray-900">
+                    {record.duration ?? record.creditsConsumed}h
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button className="text-blue-600 hover:text-blue-800 font-medium text-sm flex items-center justify-end w-full">
@@ -241,38 +363,37 @@ export function Records() {
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xl">
-                    {selectedRecord.studentName.charAt(0)}
+                    {(selectedRecord.studentName || selectedRecord.className || '课').charAt(0)}
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">{selectedRecord.studentName}</h3>
-                    <p className="text-sm text-gray-500">{selectedRecord.className}</p>
+                    <h3 className="text-lg font-bold text-gray-900">{selectedRecord.studentName || selectedRecord.className || '上课记录'}</h3>
+                    <p className="text-sm text-gray-500">{selectedRecord.courseName || selectedRecord.className}</p>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-medium text-gray-900">{selectedRecord.date}</div>
+                  <div className="text-xs text-gray-500 mt-1">{selectedRecord.timeString || `${selectedRecord.startTime ?? ''} - ${selectedRecord.endTime ?? ''}`}</div>
                   <div className="text-xs text-gray-500 mt-1">授课老师: {selectedRecord.teacherName}</div>
                 </div>
               </div>
 
-              {/* Status and Credits */}
+              {/* Basic Info */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                   <p className="text-sm text-gray-500 mb-2">上课状态</p>
-                  <div className="flex items-center justify-between">
-                     <select className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2" defaultValue={selectedRecord.status}>
-                        <option value="completed">已完成</option>
-                        <option value="student_leave">学生请假</option>
-                        <option value="teacher_leave">老师请假</option>
-                        <option value="absent">缺勤</option>
-                     </select>
-                  </div>
+                  {getStatusBadge(selectedRecord.status)}
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                  <p className="text-sm text-gray-500 mb-2">课时消耗</p>
-                  <div className="flex items-center gap-2">
-                    <input type="number" defaultValue={selectedRecord.creditsConsumed} className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-20 p-2" />
-                    <span className="text-sm text-gray-500">剩余 {students.find(s => s.id === selectedRecord.studentId)?.remainingCredits || 0} 课时</span>
-                  </div>
+                  <p className="text-sm text-gray-500 mb-2">教室 / 课时</p>
+                  <div className="text-sm font-medium text-gray-900">{selectedRecord.classroom || '-'} · {selectedRecord.duration ?? 0}h</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                  <p className="text-sm text-gray-500 mb-2">学员 / 班级</p>
+                  <div className="text-sm font-medium text-gray-900">{selectedRecord.studentName || selectedRecord.className || '-'}</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                  <p className="text-sm text-gray-500 mb-2">反馈状态</p>
+                  <div className="text-sm font-medium text-gray-900">{selectedRecord.feedbackStatus === 'submitted' ? '已提交' : '待提交'}</div>
                 </div>
               </div>
 
@@ -285,26 +406,41 @@ export function Records() {
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">本节课内容</label>
-                  <input type="text" defaultValue={selectedRecord.topic} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  <input type="text" value={feedbackForm.topic} onChange={e => setFeedbackForm({ ...feedbackForm, topic: e.target.value })} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none" />
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">课堂表现与知识点掌握</label>
-                  <textarea rows={4} defaultValue={selectedRecord.performance} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" placeholder="记录学生的课堂互动、专注度及难点掌握情况..."></textarea>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">学生课堂表现</label>
+                  <textarea rows={3} value={feedbackForm.performance} onChange={e => setFeedbackForm({ ...feedbackForm, performance: e.target.value })} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" placeholder="记录学生的课堂互动、专注度及表现..."></textarea>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">知识点掌握情况</label>
+                  <textarea rows={2} value={feedbackForm.knowledgeMastery} onChange={e => setFeedbackForm({ ...feedbackForm, knowledgeMastery: e.target.value })} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" placeholder="记录学生对重点、难点的掌握情况..."></textarea>
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">课后作业与下节计划</label>
-                  <textarea rows={2} defaultValue={selectedRecord.homework} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" placeholder="布置的作业及下次课预告..."></textarea>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">作业布置</label>
+                  <textarea rows={2} value={feedbackForm.homework} onChange={e => setFeedbackForm({ ...feedbackForm, homework: e.target.value })} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" placeholder="布置的作业..."></textarea>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">下节课计划</label>
+                  <textarea rows={2} value={feedbackForm.nextPlan} onChange={e => setFeedbackForm({ ...feedbackForm, nextPlan: e.target.value })} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" placeholder="下次课预告..."></textarea>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">内部备注</label>
+                  <textarea rows={2} value={feedbackForm.internalNotes} onChange={e => setFeedbackForm({ ...feedbackForm, internalNotes: e.target.value })} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" placeholder="仅内部可见..."></textarea>
                 </div>
 
                 <div className="flex gap-4 pt-2">
                   <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                    <input type="checkbox" className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" />
+                    <input type="checkbox" checked={feedbackForm.needAdvisorFollowUp} onChange={e => setFeedbackForm({ ...feedbackForm, needAdvisorFollowUp: e.target.checked })} className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" />
                     需要顾问跟进
                   </label>
                   <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                    <input type="checkbox" className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" defaultChecked />
+                    <input type="checkbox" checked={feedbackForm.syncToParent} onChange={e => setFeedbackForm({ ...feedbackForm, syncToParent: e.target.checked })} className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" />
                     同步给家长
                   </label>
                 </div>
@@ -344,20 +480,71 @@ export function Records() {
                   )}
                 </div>
               </div>
+
+              <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                <h4 className="font-bold text-gray-900 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-gray-400" />
+                  确认消课
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">当前课程</label>
+                    <div className="text-sm font-medium text-gray-900">{selectedRecord.courseName || '-'}</div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">消课状态</label>
+                    <div className="text-sm font-medium text-gray-900">{selectedRecord.deductionStatus === 'deducted' ? '已消课' : '待消课'}</div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">本节课时</label>
+                    <div className="text-sm font-medium text-gray-900">{selectedRecord.duration ?? 0}h</div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">当前剩余课时</label>
+                    <div className={`text-sm font-medium ${creditAccount?.lowBalance ? 'text-red-600' : 'text-gray-900'}`}>{creditAccount ? `${creditAccount.remainingHours}h` : '-'}</div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">本次扣减课时</label>
+                    <input type="number" min="0" step="0.5" value={deductionHours} onChange={e => setDeductionHours(Number(e.target.value))} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">扣减后剩余课时</label>
+                    <div className="text-sm font-medium text-gray-900">{creditAccount ? `${creditAccount.remainingHours - deductionHours}h` : '-'}</div>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs text-gray-500 mb-1 block">扣减备注</label>
+                    <input value={deductionNote} onChange={e => setDeductionNote(e.target.value)} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="可选" />
+                  </div>
+                  <label className="col-span-2 flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={feedbackForm.syncToParent} onChange={e => setFeedbackForm({...feedbackForm, syncToParent: e.target.checked})} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                    是否同步给家长
+                  </label>
+                </div>
+                {!creditAccount && (
+                  <p className="text-xs text-orange-600">未找到该学生课程的课时账户，暂不能确认消课。</p>
+                )}
+                <button
+                  onClick={handleConfirmDeduction}
+                  disabled={isSaving || selectedRecord.deductionStatus === 'deducted' || !['submitted', 'completed'].includes(selectedRecord.status) || !creditAccount || deductionHours <= 0}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm px-4 py-2.5 transition-colors disabled:opacity-50"
+                >
+                  {selectedRecord.deductionStatus === 'deducted' ? '已消课' : '确认消课'}
+                </button>
+              </div>
             </div>
 
             {/* Actions Footer */}
             <div className="p-4 bg-white border-t border-gray-200 flex justify-end gap-3 shrink-0">
               {can(user?.role, 'submitLessonRecord') && (
-                <button onClick={() => toast.success('已保存草稿')} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2">
+                <button onClick={handleSaveDraft} disabled={isSaving} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2">
                   <Save className="w-4 h-4" />
                   保存草稿
                 </button>
               )}
-              {can(user?.role, 'deductCredit') && (
-                <button onClick={handleConfirmDeduct} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+              {can(user?.role, 'submitLessonRecord') && (
+                <button onClick={handleSubmitFeedback} disabled={isSaving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
                   <Send className="w-4 h-4" />
-                  提交并确认消课
+                  提交反馈
                 </button>
               )}
             </div>

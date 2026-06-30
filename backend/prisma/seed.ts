@@ -295,6 +295,7 @@ async function main() {
       data: {
         organizationId: orgId,
         studentId,
+        courseId: courseIds[index % courseIds.length],
         balance,
         totalPurchased: balance + 20,
         totalConsumed: 20,
