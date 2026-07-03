@@ -103,6 +103,10 @@ function canImport(user: MockUser, type: ImportType) {
   return false;
 }
 
+function allowedImportTypes(user: MockUser) {
+  return (Object.keys(importTemplates) as ImportType[]).filter((type) => canImport(user, type));
+}
+
 function canExport(user: MockUser, type: ExportType) {
   if (user.role === "admin") return true;
   if (user.role === "academic_manager") return !["credit-accounts", "credit-transactions"].includes(type);
@@ -114,6 +118,10 @@ function canExport(user: MockUser, type: ExportType) {
 
 function assertImportPermission(user: MockUser, type: ImportType) {
   if (!canImport(user, type)) throw new AppError(403, "FORBIDDEN", "当前账号无权批量导入该类型数据");
+}
+
+function assertImportBatchAccess(user: MockUser, type: string) {
+  assertImportPermission(user, assertImportType(type));
 }
 
 function assertExportPermission(user: MockUser, type: ExportType) {
@@ -770,8 +778,10 @@ async function handleConfirm(req: any, res: any) {
 }
 
 async function handleBatches(req: any, res: any) {
+  const types = allowedImportTypes(req.user);
+  if (!types.length) throw new AppError(403, "FORBIDDEN", "当前账号无权查看导入批次");
   const logs = await prisma.importLog.findMany({
-    where: { organizationId: req.user.organizationId },
+    where: { organizationId: req.user.organizationId, importType: { in: types } },
     orderBy: { createdAt: "desc" },
     take: 50,
   });
@@ -781,6 +791,7 @@ async function handleBatches(req: any, res: any) {
 async function handleBatchDetail(req: any, res: any) {
   const log = await prisma.importLog.findFirst({ where: { id: req.params.id, organizationId: req.user.organizationId } });
   if (!log) throw notFound("Import batch");
+  assertImportBatchAccess(req.user, log.importType);
   return ok(res, { ...batchPayload(log), previewRows: (log.result as { rows?: PreviewRow[] } | null)?.rows ?? [], createdIds: (log.result as { createdIds?: unknown[] } | null)?.createdIds ?? [] });
 }
 
@@ -788,6 +799,7 @@ async function handleRollback(req: any, res: any) {
   const log = await prisma.importLog.findFirst({ where: { id: req.params.id, organizationId: req.user.organizationId } });
   if (!log) throw notFound("Import batch");
   const type = assertImportType(log.importType);
+  assertImportPermission(req.user, type);
   if (req.user.role !== "admin" && req.user.role !== "academic_manager") throw new AppError(403, "FORBIDDEN", "当前账号无权回滚导入批次");
   if (log.status !== "imported") throw badRequest("只有已导入批次可以回滚");
   const createdIds = (log.result as { createdIds?: Array<{ type: string; id: string }> } | null)?.createdIds ?? [];
