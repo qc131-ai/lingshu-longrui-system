@@ -497,3 +497,55 @@ export const importPreviewSchema = z.object({
     .optional(),
   rows: z.array(z.record(z.string(), z.unknown())).optional(),
 });
+
+export const organizationSettingsSchema = z.object({
+  organizationName: z.string().min(1).optional(),
+  shortName: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional().or(z.literal("")),
+  address: z.string().optional(),
+  logoText: z.string().optional(),
+  version: z.string().optional(),
+  environment: z.enum(["local", "staging", "production"]).optional(),
+  academicConfig: z.object({
+    lowCreditThreshold: z.coerce.number().nonnegative().optional(),
+    defaultLessonHours: z.coerce.number().positive().optional(),
+    allowCreditOverdraft: z.boolean().optional(),
+    enableConflictDetection: z.boolean().optional(),
+    enableLeaveApproval: z.boolean().optional(),
+    enableReportReview: z.boolean().optional(),
+  }).optional(),
+  notificationConfig: z.object({
+    enableParentNotification: z.boolean().optional(),
+    enableTeacherReminder: z.boolean().optional(),
+    enableAdvisorRenewalReminder: z.boolean().optional(),
+    channels: z.array(z.enum(["wecom", "email", "sms"])).optional(),
+  }).optional(),
+  aiConfig: z.object({
+    mode: z.enum(["rule_based", "mock"]).optional(),
+    enableAssistant: z.boolean().optional(),
+    enableRenewalSuggestion: z.boolean().optional(),
+    enableReportPolish: z.boolean().optional(),
+    apiKeyStatus: z.string().optional(),
+  }).optional(),
+});
+
+export const createUserSchema = z.object({
+  displayName: z.string().min(1),
+  email: z.string().email(),
+  password: z.string().min(6),
+  role: z.enum(["admin", "academic_manager", "advisor", "teacher", "finance"]),
+  status: z.enum(["active", "disabled"]).optional(),
+  teacherId: z.string().min(1).optional(),
+});
+
+export const updateUserSchema = z.object({
+  displayName: z.string().min(1).optional(),
+  role: z.enum(["admin", "academic_manager", "advisor", "teacher", "finance"]).optional(),
+  status: z.enum(["active", "disabled"]).optional(),
+  teacherId: z.string().min(1).nullable().optional(),
+});
+
+export const resetUserPasswordSchema = z.object({
+  password: z.string().min(6),
+});

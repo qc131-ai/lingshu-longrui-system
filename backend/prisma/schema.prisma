@@ -210,8 +210,31 @@ model Organization {
   homeworks           Homework[]
   assessments         Assessment[]
   competitionProjects CompetitionProject[]
+  setting             OrganizationSetting?
 
   @@map("organizations")
+}
+
+model OrganizationSetting {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @unique @map("organization_id") @db.Uuid
+  shortName      String?  @map("short_name") @db.VarChar(120)
+  phone          String?  @db.VarChar(50)
+  email          String?  @db.VarChar(255)
+  address        String?
+  logoText       String?  @map("logo_text") @db.VarChar(120)
+  version        String   @default("v0.4.4") @db.VarChar(40)
+  environment    String   @default("local") @db.VarChar(40)
+  academicConfig Json     @default("{}") @map("academic_config")
+  notificationConfig Json @default("{}") @map("notification_config")
+  aiConfig       Json     @default("{}") @map("ai_config")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("organization_settings")
 }
 
 model User {

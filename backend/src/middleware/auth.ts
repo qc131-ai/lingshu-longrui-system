@@ -1,7 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
-import { UserRole } from "@prisma/client";
+import { UserRole, UserStatus } from "@prisma/client";
 import { AppError } from "../lib/errors.js";
 import { verifyToken } from "../lib/token.js";
+import { prisma } from "../lib/prisma.js";
 
 export type MockUser = {
   id: string;
@@ -26,10 +27,17 @@ const roleMap: Record<UserRole, MockUser["role"]> = {
   FINANCE: "finance",
 };
 
-export function mockAuth(req: Request, _res: Response, next: NextFunction) {
+export async function mockAuth(req: Request, _res: Response, next: NextFunction) {
   const token = req.header("authorization")?.replace(/^Bearer\s+/i, "");
   const payload = token ? verifyToken(token) : null;
   if (payload) {
+    const user = await prisma.user.findFirst({
+      where: { id: payload.userId, organizationId: payload.organizationId },
+      select: { status: true },
+    });
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      return next(new AppError(401, "UNAUTHORIZED", "账号已停用或登录已失效"));
+    }
     req.user = {
       id: payload.userId,
       organizationId: payload.organizationId,

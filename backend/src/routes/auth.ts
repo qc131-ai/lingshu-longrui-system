@@ -4,6 +4,7 @@ import { asyncHandler } from "../lib/asyncHandler.js";
 import { ok } from "../lib/response.js";
 import { AppError } from "../lib/errors.js";
 import { createToken } from "../lib/token.js";
+import { verifyPassword } from "../lib/password.js";
 import { toApiRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { loginSchema } from "../validators/schemas.js";
@@ -56,7 +57,7 @@ authRouter.post(
       },
     });
 
-    if (!user || user.status !== "ACTIVE" || user.passwordHash !== password) {
+    if (!user || user.status !== "ACTIVE" || !verifyPassword(password, user.passwordHash)) {
       throw new AppError(401, "INVALID_CREDENTIALS", "邮箱或密码不正确");
     }
 

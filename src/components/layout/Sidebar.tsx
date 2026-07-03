@@ -15,7 +15,8 @@ import {
   Trophy,
   FileText,
   Bot,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Settings
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
@@ -38,6 +39,7 @@ const navigation: Array<{ name: string; href: string; icon: typeof LayoutDashboa
   { name: '财务概览', href: '/finance', icon: Wallet, roles: ['admin', 'finance'] },
   { name: '数据导入', href: '/data-import', icon: FileSpreadsheet, roles: ['admin', 'academic_manager', 'advisor', 'teacher', 'finance'] },
   { name: 'AI 教务助手', href: '/ai', icon: Bot, roles: ['admin', 'academic_manager', 'advisor', 'teacher', 'finance'] },
+  { name: '系统设置', href: '/settings', icon: Settings, roles: ['admin', 'academic_manager'] },
 ];
 
 export function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: { mobileMenuOpen: boolean, setMobileMenuOpen: (open: boolean) => void }) {

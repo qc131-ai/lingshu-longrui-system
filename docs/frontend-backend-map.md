@@ -306,6 +306,7 @@
 | `reportService` | `getParentReport`、`generateParentReportSummary` | `/reports` |
 | `aiService` | `queryAssistant`、`generateRenewalSuggestion` | `/ai`、`/orders` |
 | `importExportService` | `downloadTemplate`、`preview`、`confirm`、`listBatches`、`rollback`、`exportData` | `/data-import` |
+| `settingsService` | `getSettings`、`updateSettings`、`listUsers`、`createUser`、`updateUserStatus`、`resetPassword`、`getPermissions` | `/settings` |
 
 ---
 
@@ -329,3 +330,16 @@
 | **权限** | 管理员全部；教务主管教务导入导出；财务课时导入导出；顾问/老师只允许授权范围导出 |
 
 前端不传 `organizationId`。上传文件使用 `multipart/form-data`，API 失败时通过 toast 显示后端明确错误。家长报告导出不包含 `internalNotes`。
+
+## 16. 系统设置与用户管理
+
+| 项目 | 内容 |
+|------|------|
+| **页面名称** | 系统设置（`/settings`） |
+| **前端交互** | 管理员编辑机构信息、教务配置、通知模拟开关、AI 占位开关；管理员新增用户、启用/停用用户、重置密码；教务主管只读查看；页面下方展示只读权限矩阵 |
+| **Service** | `settingsService` |
+| **后端 API** | `GET /api/settings`、`PUT /api/settings`、`GET /api/settings/users`、`POST /api/settings/users`、`PUT /api/settings/users/:id`、`PATCH /api/settings/users/:id/status`、`POST /api/settings/users/:id/reset-password`、`GET /api/settings/permissions` |
+| **导航权限** | 仅管理员、教务主管显示「系统设置」入口 |
+| **后端权限** | 管理员可管理设置和用户；教务主管可查看；顾问、老师、财务返回 `403` |
+
+前端不传 `organizationId`。新增和重置密码只提交明文一次，后端使用 hash 存储。停用用户再次登录会被拒绝，已登录请求也会检查用户状态。

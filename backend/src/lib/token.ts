@@ -8,7 +8,7 @@ export type AuthTokenPayload = {
   exp: number;
 };
 
-const secret = process.env.AUTH_TOKEN_SECRET ?? "astralink-staging-secret";
+const secret = process.env.JWT_SECRET ?? process.env.AUTH_TOKEN_SECRET ?? "astralink-staging-secret";
 
 function base64url(input: string) {
   return Buffer.from(input).toString("base64url");

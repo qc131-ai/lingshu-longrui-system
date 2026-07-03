@@ -10,13 +10,20 @@ View your app in AI Studio: https://ai.studio/apps/a33c9ee7-0a47-4abf-b404-57fa8
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+**Prerequisites:** Node.js 20+、PostgreSQL 15+
 
-
-1. Install dependencies:
+1. 安装依赖：
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. 复制环境变量：
+   `cp .env.example .env`
+3. 修改 `.env` 中的 `DATABASE_URL`、`JWT_SECRET` / `AUTH_TOKEN_SECRET`。
+4. 初始化 Prisma 与数据库：
+   `npm run prisma:generate && npm run prisma:push`
+5. 写入演示数据：
+   `npm run seed`
+6. 启动后端：
+   `npm run backend:dev`
+7. 启动前端：
    `npm run dev`
 
 ## Astralink 本地前后端联调
@@ -35,6 +42,9 @@ VITE_API_BASE_URL="http://localhost:3000/api"
 VITE_API_PROXY_TARGET="http://localhost:4000"
 APP_ENV="staging"
 AUTH_TOKEN_SECRET="replace-with-staging-secret"
+JWT_SECRET="replace-with-staging-secret"
+FRONTEND_URL="http://localhost:3000"
+NODE_ENV="development"
 ```
 
 ### 后端
@@ -74,7 +84,7 @@ npm run dev
 - 核心业务表已增加 `organization_id`，seed 默认机构为「朗睿教育测试机构」
 - 操作日志 `operation_logs`：记录新增学员、排课、消课、课时调整、发送报告等关键操作
 - 文件上传 `POST /api/files/upload`：支持学生材料、作业附件、竞赛证书、合同、报告文件
-- 客户试用 seed 数据：30 个学生、10 位老师、15 门课程、5 个班级、30 条排课、20 条上课记录、10 条请假补课、20 条课时流水、5 份家长报告、5 条 AI 教务提醒
+- 客户试用 seed 数据：12 个学生、6 位老师、8 门课程、5 个班级、本周排课、12 条上课记录、5 条请假补课、16 条课时流水、5 份家长报告，以及低课时、未提交反馈、待审批补课、待发送报告和高风险学生等 AI 助手可查询场景
 
 ## V1.0 正式版 P0 能力
 
@@ -87,6 +97,7 @@ npm run dev
 - 确认消课自动扣减课时并生成 `credit_transactions`
 - 核心写操作记录 `operation_logs`
 - Excel 导入预览、确认导入、批次回滚、Excel 导出
+- 系统设置、用户账号管理、只读权限矩阵
 - 前端核心 service 优先请求真实 API，失败时回退 mock，保留 loading/success/error 状态
 
 ### V1 Sprint 2 基础业务模块
@@ -196,6 +207,20 @@ Sprint 4-3 在 AI 教务助手中增加规则型内容生成能力。当前阶�
 
 权限规则：管理员和教务主管可使用全部生成功能；顾问只能为自己负责学生生成续费建议和家长话术；老师不能生成续费建议；财务不能生成家长沟通话术和报告润色。
 
+### 系统设置与用户管理
+
+Sprint 4-4 提供客户试用准备能力：
+
+- `GET /api/settings` / `PUT /api/settings`：读取和保存机构信息、教务基础配置、通知设置、AI 设置。
+- `GET /api/settings/users`：用户列表。
+- `POST /api/settings/users`：新增用户。
+- `PUT /api/settings/users/:id`：编辑用户。
+- `PATCH /api/settings/users/:id/status`：启用 / 停用用户。
+- `POST /api/settings/users/:id/reset-password`：重置密码，新密码使用 hash 存储。
+- `GET /api/settings/permissions`：只读角色权限矩阵。
+
+系统设置页面入口：`/settings`，仅管理员和教务主管可见。管理员可编辑系统设置和用户；教务主管可查看设置和用户列表。顾问、老师、财务不显示入口，直接访问会看到无权限提示或后端 403。
+
 ### Staging 部署方式
 
 1. 准备 PostgreSQL 15+ 数据库。
@@ -240,7 +265,7 @@ npm run build
 ### 核心演示流程
 
 1. 使用管理员账号登录，查看首页提醒和侧边栏完整菜单。
-2. 进入「学员管理」，查看 30 个学生，并新增一个试用学员。
+2. 进入「学员管理」，查看演示学生，并新增一个试用学员。
 3. 进入「排课日历」，创建一条排课并确认日历刷新。
 4. 进入「上课记录」，打开记录详情，生成 AI 反馈并确认消课。
 5. 进入「订单课时」，查看课时流水和低课时预警。

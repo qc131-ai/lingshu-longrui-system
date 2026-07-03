@@ -13,6 +13,7 @@ import { leavesRouter } from "./routes/leaves.js";
 import { lessonRecordsRouter } from "./routes/lessonRecords.js";
 import { reportsRouter } from "./routes/reports.js";
 import { schedulesRouter } from "./routes/schedules.js";
+import { settingsRouter } from "./routes/settings.js";
 import { studentsRouter } from "./routes/students.js";
 import { teachersRouter } from "./routes/teachers.js";
 import { mockAuth } from "./middleware/auth.js";
@@ -36,6 +37,7 @@ export function createApp() {
   app.use("/api/classes", classesRouter);
   app.use("/api/teachers", teachersRouter);
   app.use("/api/schedules", schedulesRouter);
+  app.use("/api/settings", settingsRouter);
   app.use("/api/lesson-records", lessonRecordsRouter);
   app.use("/api/leave-makeup", leaveMakeupRouter);
   app.use("/api/leaves", leavesRouter);

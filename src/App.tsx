@@ -25,6 +25,7 @@ import { Reports } from './pages/Reports';
 import { Orders } from './pages/Orders';
 import { AIAssistant } from './pages/AIAssistant';
 import { DataImport } from './pages/DataImport';
+import { SystemSettings } from './pages/SystemSettings';
 import { useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
 import type { UserRole } from './services/authService';
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="finance" element={<GuardedPage roles={['admin', 'finance']}><Finance /></GuardedPage>} />
         <Route path="ai" element={<GuardedPage roles={['admin', 'academic_manager', 'advisor', 'teacher', 'finance']}><AIAssistant /></GuardedPage>} />
         <Route path="data-import" element={<GuardedPage roles={['admin', 'academic_manager', 'advisor', 'teacher', 'finance']}><DataImport /></GuardedPage>} />
+        <Route path="settings" element={<GuardedPage roles={['admin', 'academic_manager']}><SystemSettings /></GuardedPage>} />
       </Route>
     </Routes>
   );

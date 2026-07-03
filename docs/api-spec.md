@@ -962,3 +962,27 @@ pages → services.*() → data/（Mock）或 fetch API（生产）
 导出筛选：`startDate`、`endDate`、`studentId`、`courseId`、`teacherId`、`status`。V1 对日期范围已用于排课/上课记录，其他筛选预留。
 
 权限：管理员全部；教务主管可导入导出教务数据；财务可导入课时余额并导出课时账户/流水；顾问只能导出负责学生相关数据；老师只能导出自己的排课和上课记录。所有接口从 `req.user.organizationId` 读取机构，不接受前端传 `organizationId`。
+
+## Sprint 4-4 系统设置与账号管理 API
+
+所有接口从登录 token 读取 `req.user.organizationId`，前端不传 `organizationId`。写操作写入 `operation_logs`，日志失败不影响主流程。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/settings` | 读取机构信息、教务基础配置、通知设置、AI 设置 |
+| PUT | `/api/settings` | 保存系统设置，管理员可用 |
+| GET | `/api/settings/permissions` | 读取只读角色权限矩阵 |
+| GET | `/api/settings/users` | 读取用户账号列表 |
+| POST | `/api/settings/users` | 新增用户，初始密码 hash 存储 |
+| PUT | `/api/settings/users/:id` | 编辑用户姓名、角色、状态和关联信息 |
+| PATCH | `/api/settings/users/:id/status` | 启用或停用用户 |
+| POST | `/api/settings/users/:id/reset-password` | 管理员重置用户密码 |
+
+系统设置字段：
+
+- 机构信息：`organizationName`、`shortName`、`phone`、`email`、`address`、`logoText`、`version`、`environment`。
+- 教务配置：`lowCreditThreshold`、`defaultLessonDurationHours`、`allowCreditOverdraft`、`enableConflictDetection`、`enableLeaveApproval`、`enableParentReportReview`。
+- 通知设置：`enableParentNotification`、`enableTeacherReminder`、`enableAdvisorRenewalReminder`、`notificationChannels`。
+- AI 设置：`aiMode`、`enableAiAssistant`、`enableAiRenewalSuggestion`、`enableAiReportPolish`。
+
+权限：管理员可查看和修改系统设置、管理用户；教务主管可查看系统设置、用户列表和权限矩阵；顾问、老师、财务访问系统设置 API 返回 `403`。停用用户不能登录，后续接口会校验用户状态。

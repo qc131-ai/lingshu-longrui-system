@@ -23,6 +23,7 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { hashPassword } from "../src/lib/password.js";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -80,6 +81,7 @@ async function resetData() {
   await prisma.permission.deleteMany();
   await prisma.role.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.organizationSetting.deleteMany();
   await prisma.organization.deleteMany();
 }
 
@@ -90,13 +92,47 @@ async function main() {
     data: { id: orgId, name: "朗睿教育", code: "liangrui-education" },
   });
 
+  await prisma.organizationSetting.create({
+    data: {
+      organizationId: orgId,
+      shortName: "朗睿教育",
+      phone: "010-8888-0000",
+      email: "demo@longrui.com",
+      address: "北京市海淀区朗睿教育演示中心",
+      logoText: "Astralink",
+      version: "v0.4.4",
+      environment: "staging",
+      academicConfig: {
+        lowCreditThreshold: 5,
+        defaultLessonHours: 2,
+        allowCreditOverdraft: false,
+        enableConflictDetection: true,
+        enableLeaveApproval: true,
+        enableReportReview: true,
+      },
+      notificationConfig: {
+        enableParentNotification: true,
+        enableTeacherReminder: true,
+        enableAdvisorRenewalReminder: true,
+        channels: ["wecom", "email"],
+      },
+      aiConfig: {
+        mode: "rule_based",
+        enableAssistant: true,
+        enableRenewalSuggestion: true,
+        enableReportPolish: true,
+        apiKeyStatus: "后续配置",
+      },
+    },
+  });
+
   await prisma.user.createMany({
     data: [
-      { id: userIds.admin, organizationId: orgId, email: "admin@longrui.com", passwordHash: "admin123", displayName: "朗睿管理员", role: UserRole.ADMIN, status: UserStatus.ACTIVE },
-      { id: userIds.manager, organizationId: orgId, email: "academic@longrui.com", passwordHash: "academic123", displayName: "教务主管", role: UserRole.ACADEMIC_MANAGER, status: UserStatus.ACTIVE },
-      { id: userIds.advisor, organizationId: orgId, email: "advisor@longrui.com", passwordHash: "advisor123", displayName: "朗睿顾问", role: UserRole.ADVISOR, status: UserStatus.ACTIVE },
-      { id: userIds.teacher, organizationId: orgId, email: "teacher@longrui.com", passwordHash: "teacher123", displayName: "王建国", role: UserRole.TEACHER, status: UserStatus.ACTIVE },
-      { id: userIds.finance, organizationId: orgId, email: "finance@longrui.com", passwordHash: "finance123", displayName: "财务老师", role: UserRole.FINANCE, status: UserStatus.ACTIVE },
+      { id: userIds.admin, organizationId: orgId, email: "admin@longrui.com", passwordHash: hashPassword("admin123"), displayName: "朗睿管理员", role: UserRole.ADMIN, status: UserStatus.ACTIVE },
+      { id: userIds.manager, organizationId: orgId, email: "academic@longrui.com", passwordHash: hashPassword("academic123"), displayName: "教务主管", role: UserRole.ACADEMIC_MANAGER, status: UserStatus.ACTIVE },
+      { id: userIds.advisor, organizationId: orgId, email: "advisor@longrui.com", passwordHash: hashPassword("advisor123"), displayName: "朗睿顾问", role: UserRole.ADVISOR, status: UserStatus.ACTIVE },
+      { id: userIds.teacher, organizationId: orgId, email: "teacher@longrui.com", passwordHash: hashPassword("teacher123"), displayName: "王建国", role: UserRole.TEACHER, status: UserStatus.ACTIVE },
+      { id: userIds.finance, organizationId: orgId, email: "finance@longrui.com", passwordHash: hashPassword("finance123"), displayName: "财务老师", role: UserRole.FINANCE, status: UserStatus.ACTIVE },
     ],
   });
 
@@ -174,7 +210,7 @@ async function main() {
     });
   }
 
-  const teacherNames = ["王建国", "李老师", "Sarah Chen", "赵明", "Emily Wang", "陈思远", "Anna Liu", "周航", "Michael Zhang", "刘佳"];
+  const teacherNames = ["王建国", "李老师", "Sarah Chen", "赵明", "Emily Wang", "陈思远"];
   const teacherIds = teacherNames.map((_, i) => id("10000000000000000000", i + 1));
   await prisma.teacher.createMany({
     data: teacherNames.map((name, index) => ({
@@ -200,13 +236,6 @@ async function main() {
     ["AMC10竞赛班", CourseCategory.COMPETITION, "竞赛", 32, 16800],
     ["AIME冲刺营", CourseCategory.COMPETITION, "竞赛", 28, 15800],
     ["科研论文入门", CourseCategory.RESEARCH, "科研", 20, 22800],
-    ["Python科研项目", CourseCategory.RESEARCH, "科研", 24, 23800],
-    ["SAT数学高分", CourseCategory.MATH, "SAT", 18, 9800],
-    ["IB数学AA HL", CourseCategory.MATH, "IB", 36, 19800],
-    ["IG物理提升", CourseCategory.PHYSICS, "IGCSE", 30, 14800],
-    ["国际化学竞赛基础", CourseCategory.CHEMISTRY, "竞赛", 32, 16800],
-    ["学术英语阅读", CourseCategory.ENGLISH, "English", 20, 9800],
-    ["藤校申请科研课", CourseCategory.RESEARCH, "申请", 16, 25800],
   ] as const;
   const courseIds = courseTemplates.map((_, i) => id("30000000000000000000", i + 1));
   await prisma.course.createMany({
@@ -255,8 +284,7 @@ async function main() {
 
   const studentNames = [
     "张子涵", "李佳怡", "王宇航", "赵诗琪", "刘星宇", "陈雨桐", "周明轩", "吴思远", "郑可欣", "孙浩然",
-    "胡嘉怡", "朱一诺", "林子墨", "何雨泽", "高欣怡", "罗天佑", "梁语嫣", "宋梓涵", "唐铭轩", "许若曦",
-    "韩沐阳", "冯诗涵", "邓宇辰", "曹安琪", "彭俊熙", "曾可乐", "袁思齐", "董奕辰", "谢安然", "姜亦凡",
+    "胡嘉怡", "朱一诺",
   ];
   const studentIds = studentNames.map((_, i) => id("20000000000000000000", i + 1));
   await prisma.student.createMany({
@@ -304,7 +332,7 @@ async function main() {
   }));
 
   await prisma.creditTransaction.createMany({
-    data: Array.from({ length: 20 }).map((_, index) => {
+    data: Array.from({ length: 16 }).map((_, index) => {
       const studentIndex = index % studentIds.length;
       const isDeduct = index >= 12;
       const delta = isDeduct ? -2 : [12, 16, 20, 24][index % 4];
@@ -327,7 +355,7 @@ async function main() {
   });
 
   await prisma.schedule.createMany({
-    data: Array.from({ length: 30 }).map((_, index) => {
+    data: Array.from({ length: 16 }).map((_, index) => {
       const hour = 9 + (index % 6) * 2;
       return {
         id: id("60000000000000000000", index + 1),
@@ -338,7 +366,7 @@ async function main() {
         roomId: roomIds[index % roomIds.length],
         title: courseTemplates[index % courseTemplates.length][0],
         eventType: ScheduleEventType.CLASS,
-        lessonDate: date(`2026-06-${String((index % 14) + 16).padStart(2, "0")}`),
+        lessonDate: date(`2026-07-${String((index % 14) + 1).padStart(2, "0")}`),
         startTime: time(`${String(hour).padStart(2, "0")}:00`),
         endTime: time(`${String(hour + 2).padStart(2, "0")}:00`),
         durationHours: 2,
@@ -350,7 +378,7 @@ async function main() {
   });
 
   await prisma.lessonRecord.createMany({
-    data: Array.from({ length: 20 }).map((_, index) => ({
+    data: Array.from({ length: 12 }).map((_, index) => ({
       id: id("70000000000000000000", index + 1),
       organizationId: orgId,
       scheduleId: id("60000000000000000000", (index % 20) + 1),
@@ -372,7 +400,7 @@ async function main() {
   });
 
   await prisma.leaveRecord.createMany({
-    data: Array.from({ length: 10 }).map((_, index) => ({
+    data: Array.from({ length: 6 }).map((_, index) => ({
       organizationId: orgId,
       type: [LeaveRequestType.STUDENT_LEAVE, LeaveRequestType.TEACHER_LEAVE, LeaveRequestType.RESCHEDULE, LeaveRequestType.MAKEUP][index % 4],
       studentId: studentIds[index],
@@ -384,6 +412,33 @@ async function main() {
       deductCredit: index % 3 === 0,
       status: [LeaveRequestStatus.PENDING, LeaveRequestStatus.APPROVED, LeaveRequestStatus.MAKEUP_SCHEDULED, LeaveRequestStatus.MAKEUP_COMPLETED][index % 4],
       notifyStatus: index % 2 === 0 ? "notified" : "pending",
+    })),
+  });
+
+  await prisma.leaveMakeupRequest.createMany({
+    data: Array.from({ length: 5 }).map((_, index) => ({
+      id: id("65000000000000000000", index + 1),
+      organizationId: orgId,
+      scheduleId: id("60000000000000000000", index + 1),
+      studentId: studentIds[index],
+      classId: classIds[index % classIds.length],
+      courseId: courseIds[index % courseIds.length],
+      teacherId: teacherIds[index % teacherIds.length],
+      requestType: [LeaveRequestType.STUDENT_LEAVE, LeaveRequestType.TEACHER_LEAVE, LeaveRequestType.RESCHEDULE, LeaveRequestType.MAKEUP, LeaveRequestType.CANCELLATION][index],
+      originalDate: date(`2026-07-${String(index + 1).padStart(2, "0")}`),
+      originalStartTime: time("10:00"),
+      originalEndTime: time("12:00"),
+      newDate: index >= 2 ? date(`2026-07-${String(index + 10).padStart(2, "0")}`) : undefined,
+      newStartTime: index >= 2 ? time("14:00") : undefined,
+      newEndTime: index >= 2 ? time("16:00") : undefined,
+      reason: ["学生竞赛冲突", "老师临时教研", "家庭出行需调课", "补课安排确认", "课程取消演示"][index],
+      deductCredit: false,
+      needMakeup: index !== 4,
+      status: [LeaveRequestStatus.PENDING, LeaveRequestStatus.PENDING, LeaveRequestStatus.MAKEUP_PENDING, LeaveRequestStatus.MAKEUP_SCHEDULED, LeaveRequestStatus.PARENT_NOTIFIED][index],
+      parentNotified: index === 4,
+      createdBy: userIds.manager,
+      approvedBy: index >= 2 ? userIds.manager : undefined,
+      approvedAt: index >= 2 ? new Date() : undefined,
     })),
   });
 
