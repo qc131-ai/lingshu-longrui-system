@@ -14,9 +14,16 @@ export type {
 } from "./report";
 export type {
   AIChatHistoryItem,
+  AICard,
+  AICardAction,
   AIMessage,
   AIQueryIntent,
   AIQueryResult,
+  AIGenerationResult,
+  ParentMessageScenario,
+  ParentMessageResult,
+  PolishReportResult,
   RenewalSuggestion,
+  StudentRiskSummaryResult,
 } from "./ai";
 export type { Competition } from "./competition";

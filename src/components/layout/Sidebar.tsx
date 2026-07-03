@@ -14,7 +14,8 @@ import {
   Clock,
   Trophy,
   FileText,
-  Bot
+  Bot,
+  FileSpreadsheet
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
@@ -35,7 +36,8 @@ const navigation: Array<{ name: string; href: string; icon: typeof LayoutDashboa
   { name: '家长报告', href: '/reports', icon: FileText, roles: ['admin', 'academic_manager', 'advisor'] },
   { name: '订单课时', href: '/orders', icon: Wallet, roles: ['admin', 'advisor', 'finance'] },
   { name: '财务概览', href: '/finance', icon: Wallet, roles: ['admin', 'finance'] },
-  { name: 'AI 教务助手', href: '/ai', icon: Bot, roles: ['admin', 'academic_manager', 'advisor'] },
+  { name: '数据导入', href: '/data-import', icon: FileSpreadsheet, roles: ['admin', 'academic_manager', 'advisor', 'teacher', 'finance'] },
+  { name: 'AI 教务助手', href: '/ai', icon: Bot, roles: ['admin', 'academic_manager', 'advisor', 'teacher', 'finance'] },
 ];
 
 export function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: { mobileMenuOpen: boolean, setMobileMenuOpen: (open: boolean) => void }) {

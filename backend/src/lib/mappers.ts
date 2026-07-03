@@ -246,7 +246,7 @@ export function toCreditTransaction(transaction: TransactionWithRelations) {
   const balanceBefore = toNumber(transaction.balanceBefore);
   const balanceAfter = toNumber(transaction.balanceAfter);
   const adjustType = transaction.adjustType.toLowerCase();
-  const transactionType = adjustType === "lesson_deduct" ? "lesson_deduction" : adjustType;
+  const transactionType = adjustType === "lesson_deduct" ? "lesson_deduction" : adjustType === "manual" && transaction.notes?.includes("期初") ? "opening_balance" : adjustType;
   return {
     id: transaction.id,
     studentId: transaction.studentId,

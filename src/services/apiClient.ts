@@ -99,10 +99,11 @@ export const apiClient = {
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const method = options.method ?? "GET";
     const url = buildUrl(path);
+    const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
     const response = await fetch(buildUrl(path), {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...getAuthHeader(),
         ...options.headers,
       },

@@ -428,7 +428,42 @@ export const sendReportSchema = z.object({
 
 export const aiAssistantSchema = z.object({
   message: z.string().min(1),
-  sessionId: z.string().min(1).optional(),
+  sessionId: z.string().uuid().optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const aiToneSchema = z.enum(["professional", "friendly", "urgent", "warm", "concise"]).optional();
+
+export const generateRenewalSuggestionSchema = z.object({
+  studentId: z.string().min(1),
+  courseId: z.string().min(1).optional(),
+  tone: z.enum(["professional", "friendly", "urgent"]).optional(),
+  includeParentMessage: z.boolean().optional(),
+});
+
+export const generateParentMessageSchema = z.object({
+  studentId: z.string().min(1),
+  courseId: z.string().min(1).optional(),
+  scenario: z.enum([
+    "low_credit_reminder",
+    "progress_update",
+    "makeup_notice",
+    "renewal_followup",
+    "report_delivery",
+    "risk_followup",
+  ]),
+  tone: z.enum(["professional", "friendly", "urgent", "warm", "concise"]).optional(),
+});
+
+export const polishReportSchema = z.object({
+  reportId: z.string().min(1),
+  tone: z.enum(["professional", "warm", "concise"]).optional(),
+});
+
+export const studentRiskSummarySchema = z.object({
+  studentId: z.string().min(1),
+  periodStart: dateStringSchema.optional(),
+  periodEnd: dateStringSchema.optional(),
 });
 
 export const uploadFileSchema = z.object({
@@ -439,9 +474,26 @@ export const uploadFileSchema = z.object({
 });
 
 export const importTypeParamSchema = z.object({
-  type: z.enum(["students", "courses", "teachers", "credits", "schedules", "lesson-records", "orders"]),
+  type: z.enum([
+    "students",
+    "courses",
+    "teachers",
+    "classes",
+    "credits",
+    "credit-balances",
+    "credit-accounts",
+    "credit-transactions",
+    "schedules",
+    "lesson-records",
+    "leave-makeup",
+    "parent-reports",
+    "orders",
+  ]),
 });
 
 export const importPreviewSchema = z.object({
+  type: z
+    .enum(["students", "courses", "teachers", "classes", "credits", "credit-balances", "schedules", "lesson-records"])
+    .optional(),
   rows: z.array(z.record(z.string(), z.unknown())).optional(),
 });

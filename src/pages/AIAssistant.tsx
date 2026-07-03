@@ -1,14 +1,51 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Sparkles, Send, Bot, User, Menu, MessageSquare, Clock, BookOpen, Settings, Plus, ChevronRight, AlertCircle, Calendar as CalendarIcon, FileText } from 'lucide-react';
-import { useAppContext } from '../context/AppContext';
+import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { Sparkles, Send, Bot, User, MessageSquare, Clock, BookOpen, Settings, Plus, Calendar as CalendarIcon, FileText, AlertCircle, Users } from 'lucide-react';
 import { aiService } from '../services/aiService';
+import type { AICard, AICardAction, AIGenerationResult, AIQueryResult, ParentMessageScenario } from '../types';
 
 const aiChatHistory = aiService.getHistorySync();
 
+const quickQuestions = [
+  { icon: BookOpen, label: '查询低课时学生', text: '哪些学生课时低于 5 小时？' },
+  { icon: MessageSquare, label: '查询未提交反馈老师', text: '哪些老师本周还没提交反馈？' },
+  { icon: CalendarIcon, label: '查询今日教务待办', text: '今天教务有哪些待办？' },
+  { icon: AlertCircle, label: '查询待处理请假补课', text: '哪些请假补课还没处理？' },
+  { icon: FileText, label: '查询待发送家长报告', text: '哪些家长报告还没发送？' },
+  { icon: Users, label: '查询高风险学生', text: '哪些学生需要顾问跟进？' },
+];
+
+const listRoutes = new Set(['/students', '/records', '/leaves', '/reports', '/orders', '/schedule']);
+
+function asArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeText(value: unknown, fallback = '-') {
+  if (typeof value === 'string' || typeof value === 'number') return value;
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (value == null) return fallback;
+  return fallback;
+}
+
+function priorityLabel(priority?: AICard['priority']) {
+  if (priority === 'high') return '高优先级';
+  if (priority === 'medium') return '中优先级';
+  if (priority === 'low') return '低优先级';
+  return '待处理';
+}
+
+function priorityClass(priority?: AICard['priority']) {
+  if (priority === 'high') return 'bg-red-100 text-red-700';
+  if (priority === 'medium') return 'bg-orange-100 text-orange-700';
+  return 'bg-blue-50 text-blue-700';
+}
+
 export function AIAssistant() {
-  const { students } = useAppContext();
+  const navigate = useNavigate();
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<{role: 'user' | 'ai', content: string | ReactNode}[]>([]);
+  const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string | ReactNode }[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -20,90 +57,253 @@ export function AIAssistant() {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
-    
-    const userMsg = input.trim();
+  const appendAiText = (content: string | ReactNode) => {
+    setMessages(prev => [...prev, { role: 'ai', content }]);
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('已复制话术');
+    } catch {
+      toast.error('复制失败，请手动选择文本复制');
+    }
+  };
+
+  const renderGeneratedResult = (result: AIGenerationResult) => {
+    const sections: Array<{ label: string; value: string | string[] }> = [];
+    let copySource = '';
+
+    if (result.kind === 'renewal_suggestion') {
+      sections.push(
+        { label: '学生情况', value: result.studentSummary },
+        { label: '课时情况', value: result.creditSummary },
+        { label: '续费建议', value: result.renewalSuggestion },
+        { label: '家长话术', value: result.parentMessage },
+        { label: '顾问沟通重点', value: result.advisorTalkingPoints },
+        { label: '下一步动作', value: result.nextActions },
+      );
+      copySource = result.parentMessage || result.renewalSuggestion;
+    } else if (result.kind === 'parent_message') {
+      sections.push(
+        { label: '生成话术', value: result.message },
+        { label: '关键点', value: result.keyPoints },
+        { label: '建议渠道', value: result.suggestedSendChannel },
+        { label: '注意事项', value: result.cautionNotes },
+      );
+      copySource = result.message;
+    } else if (result.kind === 'polish_report') {
+      sections.push(
+        { label: '原摘要', value: result.originalSummary || '-' },
+        { label: '润色摘要', value: result.polishedSummary },
+        { label: '家长可见内容', value: result.polishedParentVisibleContent },
+        { label: '下一步计划', value: result.suggestedNextStepPlan },
+      );
+      copySource = result.polishedParentVisibleContent || result.polishedSummary;
+    } else {
+      sections.push(
+        { label: '风险等级', value: result.riskLevel === 'high' ? '高' : result.riskLevel === 'medium' ? '中' : '低' },
+        { label: '风险原因', value: result.riskReasons },
+        { label: '建议动作', value: result.recommendedActions },
+        { label: '顾问消息', value: result.advisorMessage },
+      );
+      copySource = result.advisorMessage;
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <div className="font-bold text-gray-900">{result.title}</div>
+              <div className="text-xs text-gray-500 mt-1">基于真实教务数据的规则型生成</div>
+            </div>
+            {'riskLevel' in result && (
+              <span className={`shrink-0 px-2 py-0.5 text-xs rounded-full ${priorityClass(result.riskLevel)}`}>
+                {priorityLabel(result.riskLevel)}
+              </span>
+            )}
+          </div>
+          <div className="space-y-3 text-sm">
+            {sections.map((section) => (
+              <div key={section.label}>
+                <div className="text-gray-500 mb-1">{section.label}</div>
+                {Array.isArray(section.value) ? (
+                  <ul className="list-disc pl-5 text-gray-800 space-y-1">
+                    {section.value.length > 0 ? section.value.map((item, index) => <li key={`${section.label}-${index}-${item}`}>{item}</li>) : <li>-</li>}
+                  </ul>
+                ) : (
+                  <p className="text-gray-800 whitespace-pre-line leading-relaxed">{section.value || '-'}</p>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2 mt-4">
+            <button onClick={() => copyText(copySource)} className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100">
+              复制话术
+            </button>
+            <button onClick={() => toast.success('已记录到学生跟进任务')} className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50">
+              保存到学生档案
+            </button>
+            {result.kind === 'polish_report' && (
+              <button onClick={() => toast.success('已生成报告润色结果，可在报告页应用')} className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50">
+                应用到家长报告
+              </button>
+            )}
+            <button onClick={() => toast.success('已标记为已跟进')} className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50">
+              标记为已跟进
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const handleGenerateAction = async (action: AICardAction, cardData?: Record<string, unknown>) => {
+    const payload = { ...(cardData ?? {}), ...(action.payload ?? {}) };
+    const studentId = typeof payload.studentId === 'string' ? payload.studentId : undefined;
+    const courseId = typeof payload.courseId === 'string' ? payload.courseId : undefined;
+    const reportId = typeof payload.reportId === 'string' ? payload.reportId : undefined;
+
+    setIsTyping(true);
+    try {
+      if (action.target === 'renewal_suggestion') {
+        if (!studentId) throw new Error('缺少 studentId，无法生成续费建议');
+        const result = await aiService.generateRenewalSuggestion({ studentId, courseId, tone: 'professional', includeParentMessage: true });
+        appendAiText(renderGeneratedResult({ kind: 'renewal_suggestion', title: 'AI 续费建议', ...result }));
+        return;
+      }
+      if (action.target === 'parent_message') {
+        if (!studentId) throw new Error('缺少 studentId，无法生成家长沟通话术');
+        const scenario = typeof payload.scenario === 'string' ? payload.scenario as ParentMessageScenario : 'renewal_followup';
+        const result = await aiService.generateParentMessage({ studentId, courseId, scenario, tone: 'professional' });
+        appendAiText(renderGeneratedResult({ kind: 'parent_message', ...result }));
+        return;
+      }
+      if (action.target === 'polish_report') {
+        if (!reportId) throw new Error('缺少 reportId，无法润色报告');
+        const result = await aiService.polishReport({ reportId, tone: 'warm' });
+        appendAiText(renderGeneratedResult({ kind: 'polish_report', title: 'AI 家长报告润色', ...result }));
+        return;
+      }
+      if (action.target === 'student_risk_summary') {
+        if (!studentId) throw new Error('缺少 studentId，无法生成风险总结');
+        const result = await aiService.generateStudentRiskSummary({ studentId });
+        appendAiText(renderGeneratedResult({ kind: 'student_risk_summary', title: 'AI 学生风险总结', ...result }));
+        return;
+      }
+      toast.success(action.message ?? '已生成');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI 内容生成失败';
+      toast.error(message);
+      appendAiText(`AI 内容生成失败：${message}`);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleAction = (action: AICardAction, cardData?: Record<string, unknown>) => {
+    if (action.type === 'generate') {
+      void handleGenerateAction(action, cardData);
+      return;
+    }
+    if (action.type === 'navigate' && action.target) {
+      if (listRoutes.has(action.target)) {
+        navigate(action.target);
+      } else {
+        toast.success('暂未开放详情页，已保留在当前页面');
+      }
+      return;
+    }
+    if (action.type === 'mock' && action.message) {
+      toast.success(action.message);
+      return;
+    }
+    toast.success(action.message ?? `${action.label}已生成`);
+  };
+
+  const renderResult = (result: Partial<AIQueryResult> | null | undefined) => {
+    const cards = asArray(result?.cards);
+    const actions = asArray(result?.actions);
+    return (
+      <div className="space-y-4">
+      <p>{safeText(result?.answer, 'AI 助手暂时没有返回可展示的数据，请换一个问题再试。')}</p>
+      {cards.length > 0 && (
+        <div className="grid gap-3">
+          {cards.map((card, index) => {
+            const fields = asArray(card.fields);
+            const cardActions = asArray(card.actions);
+            const cardId = safeText(card.id, `card-${index}`);
+            return (
+            <div key={String(cardId)} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex justify-between items-start gap-3 mb-3">
+                <div>
+                  <div className="font-bold text-gray-900">{safeText(card.title, '未命名结果')}</div>
+                  {card.subtitle && <div className="text-sm text-gray-500 mt-0.5">{safeText(card.subtitle)}</div>}
+                </div>
+                <span className={`shrink-0 px-2 py-0.5 text-xs rounded-full ${priorityClass(card.priority)}`}>
+                  {priorityLabel(card.priority)}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm mb-3">
+                {fields.map((field) => (
+                  <div key={`${card.id}-${field.label}`}>
+                    <span className="text-gray-500">{safeText(field.label)}：</span>
+                    <span className="font-medium text-gray-800">{safeText(field.value)}</span>
+                  </div>
+                ))}
+              </div>
+              {cardActions.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {cardActions.map((action) => (
+                    <button
+                      key={`${card.id}-${action.label}`}
+                      onClick={() => handleAction(action, card.data)}
+                      className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            );
+          })}
+        </div>
+      )}
+      {actions.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              onClick={() => handleAction(action)}
+              className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50"
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+    );
+  };
+
+  const handleSend = async (preset?: string) => {
+    const userMsg = (preset ?? input).trim();
+    if (!userMsg) return;
+
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setInput('');
     setIsTyping(true);
 
     try {
-      const result = await aiService.queryAssistant(userMsg, students);
-      let aiContent: string | ReactNode;
-
-      if (result.intent === 'credit_warning') {
-        const warningStudents = result.students;
-        aiContent = (
-          <div className="space-y-4">
-            <p>我已找到 {warningStudents.length} 名剩余课时低于 5 小时的学生：</p>
-            <div className="grid gap-3">
-              {warningStudents.map(s => (
-                <div key={s.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-gray-900">{s.name}</span>
-                      <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">剩余 {s.remainingCredits} 课时</span>
-                    </div>
-                    <span className="text-xs text-gray-500">顾问: Liang</span>
-                  </div>
-                  <div className="text-sm text-gray-600 mb-3">
-                    当前风险等级：{s.riskStatus === 'high' ? '高风险' : '中风险'}
-                  </div>
-                  <div className="flex gap-2">
-                    <button className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700">通知顾问</button>
-                    <button className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100">生成续费话术</button>
-                    <button className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-50 border border-gray-200 rounded hover:bg-gray-100">查看档案</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      } else if (result.intent === 'report') {
-        aiContent = (
-          <div className="space-y-4">
-            <p>我已为您生成本周的家长报告草稿，请查阅：</p>
-            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-3 opacity-10">
-                <FileText className="w-16 h-16 text-blue-600" />
-              </div>
-              <h4 className="font-bold text-gray-900 mb-2">周报摘要 - 韩梅梅</h4>
-              <p className="text-sm text-gray-600 leading-relaxed mb-4 relative z-10">
-                家长您好！本周韩梅梅同学在托福听力上表现优异，正确率提升至 85%。但口语练习打卡延迟了2次，建议周末重点复习 Task 2 的模板。
-              </p>
-              <div className="flex gap-2">
-                <button className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700">发送给家长</button>
-                <button className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-50 border border-gray-200 rounded hover:bg-gray-100">编辑报告</button>
-              </div>
-            </div>
-          </div>
-        );
-      } else if (result.intent === 'makeup') {
-        aiContent = (
-          <div className="space-y-4">
-            <p>以下是本周待安排的补课提醒：</p>
-            <div className="bg-white p-4 rounded-xl border border-orange-200 shadow-sm bg-orange-50/50">
-              <div className="flex items-center gap-2 mb-2 text-orange-700">
-                <AlertCircle className="w-4 h-4" />
-                <span className="font-bold">{result.count} 条补课待处理</span>
-              </div>
-              <ul className="text-sm text-gray-700 space-y-2 mb-3">
-                {result.items.map((item) => (
-                  <li key={item}>• {item}</li>
-                ))}
-              </ul>
-              <button className="px-3 py-1.5 text-xs font-medium text-white bg-orange-600 rounded hover:bg-orange-700 flex items-center gap-1">
-                <CalendarIcon className="w-3 h-3" /> 立即安排补课
-              </button>
-            </div>
-          </div>
-        );
-      } else {
-        aiContent = result.fallbackText;
-      }
-
+      const result = await aiService.queryAssistant(userMsg);
+      const aiContent = renderResult(result);
       setMessages(prev => [...prev, { role: 'ai', content: aiContent }]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      toast.error(`AI 助手请求失败：${message}`);
+      setMessages(prev => [...prev, { role: 'ai', content: `AI 助手请求失败：${message}` }]);
     } finally {
       setIsTyping(false);
     }
@@ -115,8 +315,6 @@ export function AIAssistant() {
 
   return (
     <div className="flex h-[calc(100vh-8rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      
-      {/* Left Sidebar (History & Prompts) */}
       <div className="w-64 border-r border-gray-200 bg-gray-50 flex flex-col">
         <div className="p-4 border-b border-gray-200">
           <button onClick={() => setMessages([])} className="w-full bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium rounded-lg text-sm px-4 py-2 flex items-center justify-center gap-2">
@@ -124,20 +322,19 @@ export function AIAssistant() {
             新对话
           </button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
           <div>
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">常用指令</h3>
             <div className="space-y-1">
-              <button onClick={() => setSuggestedInput('哪些学生课时低于 5 小时？')} className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-lg transition-all flex items-center gap-2">
-                <BookOpen className="w-4 h-4 text-gray-400" /> 课时预警查询
-              </button>
-              <button onClick={() => setSuggestedInput('帮我生成韩梅梅的家长报告')} className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-lg transition-all flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-gray-400" /> 学情报告生成
-              </button>
-              <button onClick={() => setSuggestedInput('安排本周补课提醒')} className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-lg transition-all flex items-center gap-2">
-                <CalendarIcon className="w-4 h-4 text-gray-400" /> 补课排期提醒
-              </button>
+              {quickQuestions.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button key={item.label} onClick={() => setSuggestedInput(item.text)} className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-sm rounded-lg transition-all flex items-center gap-2">
+                    <Icon className="w-4 h-4 text-gray-400" /> {item.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -155,9 +352,7 @@ export function AIAssistant() {
         </div>
       </div>
 
-      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col relative bg-white">
-        {/* Header */}
         <div className="h-14 border-b border-gray-200 flex items-center px-6 justify-between bg-white/80 backdrop-blur-sm z-10 absolute top-0 w-full">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-purple-600" />
@@ -168,39 +363,26 @@ export function AIAssistant() {
           </button>
         </div>
 
-        {/* Chat Content */}
         <div className="flex-1 overflow-y-auto p-6 pt-20 pb-32 space-y-6">
-          
           {messages.length === 0 ? (
-            /* Welcome State */
             <div className="flex flex-col items-center justify-center h-full text-center max-w-2xl mx-auto opacity-80 pt-10">
               <div className="w-16 h-16 bg-purple-100 rounded-2xl flex items-center justify-center mb-6 shadow-sm">
                  <Sparkles className="w-8 h-8 text-purple-600" />
               </div>
               <h2 className="text-2xl font-bold text-gray-900 mb-2">有什么我可以帮您的吗？</h2>
-              <p className="text-gray-500 mb-8">我可以帮您分析数据、智能排课、或者生成家长报告。</p>
+              <p className="text-gray-500 mb-8">我可以帮您分析真实教务数据、识别风险事项、整理运营待办。</p>
 
               <div className="grid grid-cols-2 gap-4 w-full text-left">
-                <button onClick={() => setSuggestedInput('生成李佳怡近期的学习进度报告')} className="p-4 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-sm text-gray-700 group relative overflow-hidden">
-                   <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 transform -translate-x-full group-hover:translate-x-0 transition-transform"></div>
-                   <span className="block font-bold text-gray-900 mb-1">查询学生画像</span>
-                   生成李佳怡近期的学习进度报告
-                </button>
-                <button onClick={() => setSuggestedInput('为周末的托福班寻找空闲教室')} className="p-4 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-sm text-gray-700 group relative overflow-hidden">
-                   <div className="absolute top-0 left-0 w-1 h-full bg-green-500 transform -translate-x-full group-hover:translate-x-0 transition-transform"></div>
-                   <span className="block font-bold text-gray-900 mb-1">智能排课建议</span>
-                   为周末的托福班寻找空闲教室
-                </button>
-                <button onClick={() => setSuggestedInput('哪些学生课时低于 5 小时？')} className="p-4 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-sm text-gray-700 group relative overflow-hidden">
-                   <div className="absolute top-0 left-0 w-1 h-full bg-orange-500 transform -translate-x-full group-hover:translate-x-0 transition-transform"></div>
-                   <span className="block font-bold text-gray-900 mb-1">课时预警分析</span>
-                   列出本月可能课时不足的学生
-                </button>
-                <button onClick={() => setSuggestedInput('帮我润色张子涵的今日课后评语')} className="p-4 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-sm text-gray-700 group relative overflow-hidden">
-                   <div className="absolute top-0 left-0 w-1 h-full bg-purple-500 transform -translate-x-full group-hover:translate-x-0 transition-transform"></div>
-                   <span className="block font-bold text-gray-900 mb-1">课堂反馈优化</span>
-                   帮我润色张子涵的今日课后评语
-                </button>
+                {quickQuestions.map((item, index) => {
+                  const colors = ['bg-blue-500', 'bg-green-500', 'bg-orange-500', 'bg-purple-500', 'bg-red-500', 'bg-cyan-500'];
+                  return (
+                    <button key={item.label} onClick={() => setSuggestedInput(item.text)} className="p-4 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-sm text-gray-700 group relative overflow-hidden">
+                      <div className={`absolute top-0 left-0 w-1 h-full ${colors[index]} transform -translate-x-full group-hover:translate-x-0 transition-transform`}></div>
+                      <span className="block font-bold text-gray-900 mb-1">{item.label}</span>
+                      {item.text}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -243,7 +425,6 @@ export function AIAssistant() {
           )}
         </div>
 
-        {/* Input Area */}
         <div className="absolute bottom-0 w-full p-4 bg-gradient-to-t from-white via-white to-transparent pt-10">
           <div className="max-w-4xl mx-auto relative shadow-lg rounded-2xl bg-white border border-gray-200 focus-within:ring-2 focus-within:ring-purple-100 focus-within:border-purple-300 transition-all">
             <textarea
@@ -255,12 +436,12 @@ export function AIAssistant() {
                   handleSend();
                 }
               }}
-              placeholder="输入您的问题或指令，例如：帮我分析张子涵的近期成绩趋势..."
+              placeholder="输入您的问题或指令，例如：哪些学生课时低于 5 小时？"
               className="w-full max-h-32 min-h-[56px] py-4 pl-4 pr-14 bg-transparent outline-none resize-none text-gray-900 text-sm"
               rows={1}
             />
-            <button 
-              onClick={handleSend}
+            <button
+              onClick={() => handleSend()}
               disabled={!input.trim() || isTyping}
               className="absolute right-2 bottom-2 w-10 h-10 bg-purple-600 hover:bg-purple-700 text-white rounded-xl flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >

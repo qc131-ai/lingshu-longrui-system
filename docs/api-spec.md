@@ -631,12 +631,17 @@ pending -> cancelled
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| POST | `/imports/:type/preview` | 上传 Excel 或提交 rows，生成导入预览批次 | 管理员、教务主管、财务 |
-| POST | `/imports/:id/commit` | 确认导入预览批次 | 管理员、教务主管、财务 |
-| POST | `/imports/:id/rollback` | 按批次回滚可回滚数据 | 管理员 |
-| GET | `/imports/export/:type` | 导出 Excel 文件 | 管理员、教务主管、财务 |
+| GET | `/import/templates/:type` | 下载 Excel 模板 | 管理员、教务主管、财务按类型授权 |
+| POST | `/import/preview` | 上传 Excel 生成导入预览批次 | 管理员、教务主管、财务按类型授权 |
+| POST | `/import/confirm/:batchId` | 确认导入预览批次 | 管理员、教务主管、财务按类型授权 |
+| GET | `/import/batches` | 查询导入批次 | 登录用户按机构隔离 |
+| GET | `/import/batches/:id` | 查询导入批次详情 | 登录用户按机构隔离 |
+| POST | `/import/batches/:id/rollback` | 按批次回滚可回滚数据 | 管理员、教务主管 |
+| GET | `/export/:type` | 导出 Excel 文件 | 按角色和类型授权 |
 
-`type` 支持：`students`、`courses`、`teachers`、`credits`、`schedules`、`lesson-records`、`orders`。
+导入 `type` 支持：`students`、`courses`、`teachers`、`classes`、`credit-balances`、`schedules`、`lesson-records`。
+
+导出 `type` 支持：`students`、`courses`、`teachers`、`classes`、`credit-accounts`、`credit-transactions`、`schedules`、`lesson-records`、`leave-makeup`、`parent-reports`。
 
 ### 数据范围规则
 
@@ -688,29 +693,175 @@ pending -> cancelled
 |------|------|
 | **页面** | `/ai` — AI 智能助理 |
 | **操作** | 输入问题并发送 |
-| **Service** | `aiService.queryAssistant(message, students)` |
-| **方法** | `POST /ai/chat` |
+| **Service** | `aiService.queryAssistant(message, context?)` |
+| **方法** | `POST /api/ai/assistant` |
 
-**请求** `{ "message": "哪些学生课时低于 5 小时？" }`
+**请求**
+
+```json
+{
+  "message": "哪些学生课时低于 5 小时？",
+  "context": {}
+}
+```
+
+前端不传 `organizationId`，后端从登录 token 的 `req.user.organizationId` 读取并隔离所有查询。
 
 **返回** — `AIQueryResult`
 
+```json
+{
+  "answer": "我找到了 3 名剩余课时低于或等于 5 小时的学生。",
+  "intent": "low_credit_students",
+  "cards": [
+    {
+      "id": "credit-account-id",
+      "type": "low_credit_student",
+      "title": "李佳怡",
+      "subtitle": "SAT数学高分",
+      "priority": "high",
+      "fields": [
+        { "label": "剩余课时", "value": 2 }
+      ],
+      "actions": [
+        { "label": "查看学员", "type": "navigate", "target": "/students" }
+      ]
+    }
+  ],
+  "actions": [],
+  "relatedData": { "count": 3 }
+}
+```
+
 | intent | 说明 |
 |--------|------|
-| `credit_warning` | 课时预警，含 `students[]` |
-| `report` | 报告生成意图 |
-| `makeup` | 补课提醒，含 `items[]` |
-| `default` | 默认回复 `fallbackText` |
+| `low_credit_students` | 查询 `credit_accounts.balance <= 5` 的低课时学生，返回学生、课程、剩余课时、顾问、风险等级 |
+| `missing_teacher_feedback` | 查询 `lesson_records.status in draft/pending_feedback`，按老师聚合未提交反馈 |
+| `academic_todo` | 聚合今日排课、待提交反馈、待审批请假补课、待发送家长报告、低课时预警 |
+| `leave_makeup_pending` | 查询 `leave_makeup_requests.status in pending/makeup_pending` |
+| `parent_report_pending` | 查询 `parent_reports.status in draft/generated/reviewed`，并统计本月缺失报告 |
+| `student_risk` | 综合低课时、需顾问跟进反馈、待处理请假补课、待发送报告生成风险卡片 |
+| `unknown` | 无法识别意图时返回可尝试的问题类型 |
 
-### AI 续费建议
+权限规则：
 
-| 项目 | 内容 |
-|------|------|
-| **页面** | `/orders` — 右侧智能续费卡片 |
-| **Service** | `aiService.generateRenewalSuggestion()` |
-| **方法** | `POST /ai/renewal-suggestion` |
+- 管理员、教务主管可查询机构内全部教务数据。
+- 顾问只能查询自己负责学生相关数据。
+- 老师只能查询自己的课程、反馈、请假补课风险，不返回全机构报告或财务数据。
+- 财务仅返回课时、续费相关数据，不返回老师反馈、请假补课、家长报告详情。
+- 每次提问和识别到的 intent 写入 `operation_logs`；日志失败不影响主流程。
 
-**返回** — `RenewalSuggestion`
+### Sprint 4-3 AI 内容生成 API
+
+本阶段仍为规则型生成 / mock AI，不接真实 OpenAI API；但所有内容都基于真实数据库数据生成。前端不得传 `organizationId`，后端从 token 的 `req.user.organizationId` 隔离数据。返回内容不得暴露 `internalNotes`、`operation_logs` 或跨机构数据。
+
+#### POST /api/ai/generate-renewal-suggestion
+
+生成续费建议。读取 `students`、`credit_accounts`、最近 `lesson_records`、待处理 `leave_makeup_requests`、最近 `parent_reports`。
+
+请求：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| studentId | string | 是 | 学员 ID |
+| courseId | string | 否 | 课程 ID；不传则使用低课时或最近课程 |
+| tone | enum | 否 | `professional`、`friendly`、`urgent` |
+| includeParentMessage | boolean | 否 | 是否返回家长沟通话术 |
+
+返回：
+
+```json
+{
+  "studentSummary": "学生当前情况摘要",
+  "creditSummary": "课时账户摘要",
+  "riskLevel": "medium",
+  "renewalSuggestion": "续费建议",
+  "parentMessage": "家长沟通话术",
+  "advisorTalkingPoints": ["沟通重点"],
+  "nextActions": ["下一步动作"]
+}
+```
+
+规则：`remainingHours <= 3` 为高优先级，`<= 5` 为中高优先级；如有未处理请假补课，建议先处理服务问题；如报告未发送，建议先发送报告再推进续费。
+
+#### POST /api/ai/generate-parent-message
+
+生成家长沟通话术。读取学生档案、课时、最近反馈、请假补课和报告状态。
+
+请求：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| studentId | string | 是 | 学员 ID |
+| scenario | enum | 是 | `low_credit_reminder`、`progress_update`、`makeup_notice`、`renewal_followup`、`report_delivery`、`risk_followup` |
+| courseId | string | 否 | 课程 ID |
+| tone | enum | 否 | `professional`、`friendly`、`urgent`、`warm`、`concise` |
+
+返回：
+
+```json
+{
+  "title": "低课时提醒话术",
+  "message": "可发送给家长的文本",
+  "keyPoints": ["关键点"],
+  "suggestedSendChannel": "wecom",
+  "cautionNotes": ["注意事项"]
+}
+```
+
+#### POST /api/ai/polish-report
+
+润色家长报告，只返回预览结果，不自动覆盖报告。读取 `parent_reports` 中家长可见字段，不返回 `internalNotes`。
+
+请求：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| reportId | string | 是 | 家长报告 ID |
+| tone | enum | 否 | `professional`、`warm`、`concise` |
+
+返回：
+
+```json
+{
+  "originalSummary": "原摘要",
+  "polishedSummary": "润色摘要",
+  "polishedParentVisibleContent": "润色后的家长可见内容",
+  "suggestedNextStepPlan": "建议下一步计划"
+}
+```
+
+#### POST /api/ai/student-risk-summary
+
+生成学生风险总结。综合低课时、待提交反馈、请假补课未处理、报告未发送、老师标记 `needAdvisorFollowUp` 等真实数据。
+
+请求：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| studentId | string | 是 | 学员 ID |
+| periodStart | string | 否 | 开始日期，`YYYY-MM-DD` |
+| periodEnd | string | 否 | 结束日期，`YYYY-MM-DD` |
+
+返回：
+
+```json
+{
+  "riskLevel": "high",
+  "riskReasons": ["风险原因"],
+  "evidence": {},
+  "recommendedActions": ["建议动作"],
+  "advisorMessage": "顾问跟进话术"
+}
+```
+
+权限规则：
+
+- 管理员、教务主管：可生成全部机构内内容。
+- 顾问：只能为自己负责学生生成续费建议、家长话术、报告润色和风险总结。
+- 老师：不能生成续费建议；可基于自己课程相关学生生成风险/学习反馈类总结。
+- 财务：不能生成家长报告和学生沟通话术。
+- 所有生成操作写入 `operation_logs`；日志失败只输出 warning，不影响主流程。
 
 ---
 
@@ -767,5 +918,47 @@ pages → services.*() → data/（Mock）或 fetch API（生产）
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 4.2.0 | 2026-07-01 | Sprint 4-2：补充 Excel 导入导出 API、模板、批次、回滚与权限 |
 | 2.0.0 | 2026-06-28 | 对齐 Astralink 工程结构，补充 6 大交互 API 与页面对应关系 |
 | 1.0.0 | 2026-06-28 | 初始版本 |
+
+## Sprint 4-2 Excel 导入导出 API
+
+### 导入 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/import/templates/:type` | 下载导入模板 `.xlsx` |
+| POST | `/api/import/preview` | 上传 Excel 预览校验，`multipart/form-data`：`type`、`file` |
+| POST | `/api/import/confirm/:batchId` | 确认导入有效行 |
+| GET | `/api/import/batches` | 查询导入批次 |
+| GET | `/api/import/batches/:id` | 查看批次详情 |
+| POST | `/api/import/batches/:id/rollback` | 回滚已导入批次 |
+
+兼容旧路径：`/api/imports/:type/preview`、`/api/imports/:id/commit`、`/api/imports/:id/rollback`。
+
+支持导入类型：`students`、`courses`、`teachers`、`classes`、`credit-balances`、`schedules`、`lesson-records`。
+
+模板字段：
+
+- `students`：学员姓名、手机号、年级、当前学校、目标国家、目标方向、负责顾问、家长姓名、家长电话、标签、风险状态、备注。
+- `courses`：课程名称、课程类别、授课方式、总课时、标准价格、适合年级、负责老师、状态、课程简介、课程大纲。
+- `teachers`：老师姓名、手机号、邮箱、老师类型、擅长科目、可授课程、可用时间、状态、备注。
+- `classes`：班级名称、关联课程、主讲老师、上课时间、教室、容量、状态、备注。
+- `credit-balances`：学员姓名、手机号、课程名称、已购买课时、已消耗课时、剩余课时、赠送课时、冻结课时、备注。
+- `schedules`：学员姓名、班级名称、课程名称、老师姓名、上课日期、开始时间、结束时间、教室、状态、备注。
+- `lesson-records`：学员姓名、班级名称、课程名称、老师姓名、上课日期、开始时间、结束时间、本节课时、课堂内容、学生表现、作业布置、老师反馈、状态、是否已消课、备注。
+
+预览返回：`importBatchId`、`totalRows`、`validRows`、`invalidRows`、`warningRows`、`errors`、`previewRows`。单行错误不会导致整个预览失败；确认导入只写入有效行。
+
+### 导出 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/export/:type` | 导出 `.xlsx` |
+
+支持导出类型：`students`、`courses`、`teachers`、`classes`、`credit-accounts`、`credit-transactions`、`schedules`、`lesson-records`、`leave-makeup`、`parent-reports`。
+
+导出筛选：`startDate`、`endDate`、`studentId`、`courseId`、`teacherId`、`status`。V1 对日期范围已用于排课/上课记录，其他筛选预留。
+
+权限：管理员全部；教务主管可导入导出教务数据；财务可导入课时余额并导出课时账户/流水；顾问只能导出负责学生相关数据；老师只能导出自己的排课和上课记录。所有接口从 `req.user.organizationId` 读取机构，不接受前端传 `organizationId`。

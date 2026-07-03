@@ -131,28 +131,70 @@ npm run dev
 
 ### Excel 导入导出接口
 
-导入支持上传 `.xlsx` 文件，或在开发调试时直接提交 JSON rows。
+Sprint 4-2 提供 V1 可用的数据迁移能力：模板下载、Excel 预览校验、确认写入、批次回滚和导出。
+
+下载模板：
 
 ```bash
-curl -X POST http://localhost:4000/api/imports/students/preview \
+curl -L http://localhost:4000/api/import/templates/students \
   -H "Authorization: Bearer <token>" \
+  -o students-template.xlsx
+```
+
+上传预览：
+
+```bash
+curl -X POST http://localhost:4000/api/import/preview \
+  -H "Authorization: Bearer <token>" \
+  -F "type=students" \
   -F "file=@students.xlsx"
 ```
 
 确认导入：
 
 ```bash
-curl -X POST http://localhost:4000/api/imports/<batch-id>/commit \
+curl -X POST http://localhost:4000/api/import/confirm/<batch-id> \
+  -H "Authorization: Bearer <token>"
+```
+
+查看批次 / 回滚：
+
+```bash
+curl http://localhost:4000/api/import/batches \
+  -H "Authorization: Bearer <token>"
+
+curl -X POST http://localhost:4000/api/import/batches/<batch-id>/rollback \
   -H "Authorization: Bearer <token>"
 ```
 
 导出：
 
 ```bash
-curl -L http://localhost:4000/api/imports/export/students \
+curl -L http://localhost:4000/api/export/students \
   -H "Authorization: Bearer <token>" \
   -o students.xlsx
 ```
+
+支持导入类型：`students`、`courses`、`teachers`、`classes`、`credit-balances`、`schedules`、`lesson-records`。
+
+支持导出类型：`students`、`courses`、`teachers`、`classes`、`credit-accounts`、`credit-transactions`、`schedules`、`lesson-records`、`leave-makeup`、`parent-reports`。
+
+本地页面入口：`/data-import`。所有接口由后端从 token 读取 `organizationId`，前端不要传 `organizationId`。
+
+### AI 续费建议与家长沟通话术
+
+Sprint 4-3 在 AI 教务助手中增加规则型内容生成能力。当前阶段不接真实 OpenAI API，也不调用外部大模型；后端基于真实数据库数据生成结构化建议，后续可替换为真实 AI API。
+
+接口：
+
+- `POST /api/ai/generate-renewal-suggestion`：生成续费建议。请求字段：`studentId`、`courseId?`、`tone?`、`includeParentMessage?`；返回 `studentSummary`、`creditSummary`、`riskLevel`、`renewalSuggestion`、`parentMessage`、`advisorTalkingPoints`、`nextActions`。
+- `POST /api/ai/generate-parent-message`：生成家长沟通话术。请求字段：`studentId`、`scenario`、`courseId?`、`tone?`；`scenario` 支持 `low_credit_reminder`、`progress_update`、`makeup_notice`、`renewal_followup`、`report_delivery`、`risk_followup`。
+- `POST /api/ai/polish-report`：润色家长报告。请求字段：`reportId`、`tone?`；返回原摘要、润色摘要、家长可见内容和下一步计划。
+- `POST /api/ai/student-risk-summary`：生成学生风险总结。请求字段：`studentId`、`periodStart?`、`periodEnd?`；返回风险等级、风险原因、证据、建议动作和顾问话术。
+
+数据来源：`students`、`credit_accounts`、`lesson_records`、`leave_makeup_requests`、`parent_reports`。所有接口由后端从 token 读取 `organizationId`，前端不要传 `organizationId`；返回内容不得暴露 `internalNotes`、`operation_logs` 或跨机构数据。
+
+权限规则：管理员和教务主管可使用全部生成功能；顾问只能为自己负责学生生成续费建议和家长话术；老师不能生成续费建议；财务不能生成家长沟通话术和报告润色。
 
 ### Staging 部署方式
 

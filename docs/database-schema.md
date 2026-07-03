@@ -757,4 +757,26 @@ ai_messages INSERT（user 提问）
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 4.2.0 | 2026-07-01 | Sprint 4-2：说明 ImportLog 作为 V1 导入批次模型 |
 | 1.0.0 | 2026-06-28 | MVP 数据模型初版，覆盖 12 张核心表 + 2 张辅助表 |
+
+## 11. Sprint 4-2 导入批次模型
+
+V1 不新增表，复用 `import_logs` 作为 `ImportBatch`：
+
+| ImportBatch 字段 | 当前表字段 | 说明 |
+|------------------|------------|------|
+| `id` | `import_logs.id` | 批次 ID |
+| `organizationId` | `organization_id` | 机构隔离 |
+| `type` | `import_type` | 导入类型 |
+| `fileName` | `file_name` | 原始文件名 |
+| `totalRows` | `total_rows` | 总行数 |
+| `validRows` | `success_rows` | 有效行 |
+| `invalidRows` | `failed_rows` | 错误行 |
+| `status` | `status` | `previewed`、`imported`、`failed`、`rolled_back` |
+| `createdBy` | `created_by` | 上传人 |
+| `confirmedAt` | `imported_at` | 确认导入时间 |
+| `rollbackAt` | `rolled_back_at` | 回滚时间 |
+| `previewRows/errors` | `result` JSON | 每行原始数据、标准化数据、错误和 warning |
+
+确认导入后，`result.createdIds` 保存本批次写入的实体 ID，回滚时只处理这些 ID，不影响非该批次创建的数据。课时余额导入会 upsert `credit_accounts`，并生成一条 `credit_transactions`，`adjust_type = manual`，`notes` 标记为 `Excel 导入期初课时余额`；导出时展示为 `opening_balance`。

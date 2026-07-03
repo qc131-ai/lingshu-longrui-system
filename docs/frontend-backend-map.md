@@ -211,13 +211,45 @@
 | 项目 | 内容 |
 |------|------|
 | **页面名称** | AI 智能助理（`/ai`） |
-| **前端交互** | 输入自然语言问题 → 发送 → 展示结构化回复（课时预警列表、补课提醒、报告意图等） |
-| **当前调用的 service 函数** | `aiService.queryAssistant(message, students)`<br>`aiService.getHistorySync()`（左侧历史会话列表） |
-| **未来对应的后端 API** | `POST /api/ai/chat`<br>`GET /api/ai/history` |
-| **请求字段** | `POST` Body：`{ message: string }`；可选上下文 `sessionId` |
-| **返回字段** | `AIQueryResult`（按 `intent` 分支）：<br>· `credit_warning`：`{ intent, students: Student[] }`<br>· `makeup`：`{ intent, items: string[], count }`<br>· `report`：`{ intent: "report" }`<br>· `default`：`{ intent, fallbackText }` |
-| **是否需要权限校验** | 是 · 登录教务人员；AI 调用需限流与审计 |
-| **是否第一阶段 MVP 必做** | **否**（体验增强；MVP 可用固定报表替代） |
+| **前端交互** | 输入自然语言问题 → 发送真实 API → 展示 `answer` 和结构化 `cards`；快捷问题覆盖低课时、反馈、待办、请假补课、家长报告、学生风险 |
+| **当前调用的 service 函数** | `aiService.queryAssistant(message, context?)`<br>`aiService.getHistorySync()`（左侧历史会话列表） |
+| **对应的后端 API** | `POST /api/ai/assistant` |
+| **请求字段** | `POST` Body：`{ message: string, context?: object, sessionId?: string }`；前端不传 `organizationId` |
+| **返回字段** | `{ answer, intent, cards, actions, relatedData? }`；`cards[]` 包含 `title`、`subtitle`、`priority`、`fields[]`、`actions[]` |
+| **是否需要权限校验** | 是 · 后端按 `req.user.organizationId` 隔离；管理员/教务主管查全部，顾问仅负责学员，老师仅自己的课程反馈，财务仅课时续费数据 |
+| **是否第一阶段 MVP 必做** | **是**（Sprint 4-1：AI 教务助手真实数据接入） |
+
+支持的 `intent`：
+
+- `low_credit_students`：读取 `credit_accounts`，查询剩余课时 `<= 5` 的学员。
+- `missing_teacher_feedback`：读取 `lesson_records`，按老师聚合草稿/待提交反馈。
+- `academic_todo`：聚合今日排课、待提交反馈、待审批请假补课、待发送报告、低课时预警。
+- `leave_makeup_pending`：读取 `leave_makeup_requests`，查询待审批/待安排补课。
+- `parent_report_pending`：读取 `parent_reports`，查询待审核/待发送报告，并统计本月缺失报告。
+- `student_risk`：综合低课时、老师标记顾问跟进、请假补课待处理、报告待发送生成风险卡片。
+- `unknown`：无法识别时返回可尝试的问题类型。
+
+卡片按钮：查看学员、查看上课记录、查看申请、查看报告采用列表页跳转；通知顾问、提醒老师为 toast 任务占位；低课时、风险、家长报告卡片可继续调用 Sprint 4-3 内容生成 API。
+
+## 12.1 AI 续费建议与家长沟通话术
+
+| 项目 | 内容 |
+|------|------|
+| **页面名称** | AI 智能助理（`/ai`） |
+| **前端交互** | 低课时卡片点击「生成续费建议」「生成家长沟通话术」；风险卡片点击「生成风险总结」「生成顾问跟进话术」；报告卡片点击「润色报告」「生成发送说明」 |
+| **当前调用的 service 函数** | `aiService.generateRenewalSuggestion()`、`generateParentMessage()`、`polishReport()`、`generateStudentRiskSummary()` |
+| **对应的后端 API** | `POST /api/ai/generate-renewal-suggestion`、`POST /api/ai/generate-parent-message`、`POST /api/ai/polish-report`、`POST /api/ai/student-risk-summary` |
+| **请求字段** | 续费：`studentId`、`courseId?`、`tone?`、`includeParentMessage?`；话术：`studentId`、`scenario`、`courseId?`、`tone?`；润色：`reportId`、`tone?`；风险：`studentId`、`periodStart?`、`periodEnd?` |
+| **返回字段** | 结构化生成结果：标题、生成内容、关键点、建议动作、风险等级等；前端在聊天区渲染卡片，不直接渲染对象 |
+| **数据来源** | `students`、`credit_accounts`、`lesson_records`、`leave_makeup_requests`、`parent_reports` |
+| **权限规则** | `admin` / `academic_manager` 可生成全部；`advisor` 仅负责学生；`teacher` 不能生成续费建议；`finance` 不能生成家长沟通和报告内容 |
+| **是否第一阶段 MVP 必做** | **是**（Sprint 4-3：规则型 AI 内容生成，未接真实 OpenAI API） |
+
+前端按钮补充：
+
+- 「复制话术」使用浏览器 clipboard。
+- 「保存到学生档案」「应用到家长报告」「标记为已跟进」本阶段保留接口设计，先用 toast 反馈。
+- API 失败时在聊天区显示错误消息，不触发整页白屏。
 
 ---
 
@@ -273,6 +305,7 @@
 | `creditService` | `listTransactions`、`adjustCredits` | `/orders` |
 | `reportService` | `getParentReport`、`generateParentReportSummary` | `/reports` |
 | `aiService` | `queryAssistant`、`generateRenewalSuggestion` | `/ai`、`/orders` |
+| `importExportService` | `downloadTemplate`、`preview`、`confirm`、`listBatches`、`rollback`、`exportData` | `/data-import` |
 
 ---
 
@@ -280,4 +313,19 @@
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 4.2.0 | 2026-07-01 | Sprint 4-2：新增数据导入导出页面与 API 对照 |
 | 1.0.0 | 2026-06-28 | 初版：覆盖 14 项核心交互，标注 service 接通状态与 MVP 优先级 |
+
+## 15. 数据导入导出
+
+| 项目 | 内容 |
+|------|------|
+| **页面名称** | 数据导入导出（`/data-import`） |
+| **前端交互** | 选择导入类型 → 下载模板 → 上传 `.xlsx` → 预览校验 → 确认导入 → 批次列表/回滚；右侧支持数据导出 |
+| **Service** | `importExportService` |
+| **后端 API** | `GET /api/import/templates/:type`、`POST /api/import/preview`、`POST /api/import/confirm/:batchId`、`GET /api/import/batches`、`GET /api/import/batches/:id`、`POST /api/import/batches/:id/rollback`、`GET /api/export/:type` |
+| **导入类型** | 学员、课程、老师、班级、课时余额、历史排课、历史上课记录 |
+| **导出类型** | 学员、课程、老师、班级、课时账户、课时流水、排课记录、上课记录、请假补课、家长报告 |
+| **权限** | 管理员全部；教务主管教务导入导出；财务课时导入导出；顾问/老师只允许授权范围导出 |
+
+前端不传 `organizationId`。上传文件使用 `multipart/form-data`，API 失败时通过 toast 显示后端明确错误。家长报告导出不包含 `internalNotes`。
