@@ -51,6 +51,31 @@ npm run seed
 - 静态部署：`VITE_API_BASE_URL=https://backend-domain/api`。
 - 如果前端和后端不同域名，必须正确设置后端 `CORS_ORIGIN`。
 
+## 本地 / Staging / Production 差异
+
+| 环境 | 前端 | 后端 | 数据库 | seed | 安全要求 |
+|------|------|------|--------|------|----------|
+| local | Vite dev server `localhost:3000` | `localhost:4000` | 本机 PostgreSQL | 可反复执行 | 可使用 demo 账号 |
+| staging | Vercel / Netlify / 静态托管 | Render / Railway / VPS | 托管 PostgreSQL staging 库 | 试用前执行 demo seed | 限定 CORS，使用独立 JWT_SECRET |
+| production | 正式域名 | 正式 API 域名 | 正式 PostgreSQL | 不执行 demo seed | 禁用测试密码，启用备份和日志脱敏 |
+ 
+上线前推荐运行：
+
+```bash
+npm run check
+curl https://<backend-domain>/api/health
+```
+
+staging 首次初始化建议：
+
+```bash
+npm install
+npm run prisma:generate
+npm run prisma:push
+npm run seed
+npm run check
+```
+
 ## CORS 配置
 
 `CORS_ORIGIN` 支持逗号分隔：
@@ -83,3 +108,4 @@ CORS_ORIGIN="https://staging.example.com,https://demo.example.com"
   - `finance@longrui.com / finance123`
 - 执行 `npm run seed` 重置演示数据。
 - 试用前运行 `docs/release-checklist.md` 中的检查项。
+- 演示时使用 `docs/demo-script.md`，客户试用发放 `docs/trial-guide.md` 和 `docs/trial-feedback-form.md`。

@@ -469,6 +469,56 @@ async function main() {
     })),
   });
 
+  await prisma.importLog.createMany({
+    data: [
+      {
+        organizationId: orgId,
+        importType: "students",
+        fileName: "朗睿演示学员导入.xlsx",
+        totalRows: 6,
+        successRows: 6,
+        failedRows: 0,
+        status: "imported",
+        result: {
+          rows: studentNames.slice(0, 6).map((name, index) => ({ rowNumber: index + 2, status: "valid", data: { name, phone: `138${String(index + 1).padStart(8, "0")}` } })),
+          createdIds: studentIds.slice(0, 6).map((studentId) => ({ type: "student", id: studentId })),
+        },
+        createdBy: userIds.admin,
+        importedAt: new Date(),
+      },
+      {
+        organizationId: orgId,
+        importType: "credit-balances",
+        fileName: "课时余额迁移预览.xlsx",
+        totalRows: 4,
+        successRows: 3,
+        failedRows: 1,
+        status: "previewed",
+        result: {
+          rows: [
+            { rowNumber: 2, status: "valid", data: { studentName: studentNames[0], courseName: courseTemplates[0][0], balance: 2 } },
+            { rowNumber: 3, status: "valid", data: { studentName: studentNames[1], courseName: courseTemplates[1][0], balance: 5 } },
+            { rowNumber: 4, status: "invalid", errors: ["课程名称未匹配"], data: { studentName: "待确认学员", courseName: "未知课程" } },
+          ],
+        },
+        createdBy: userIds.finance,
+      },
+      {
+        organizationId: orgId,
+        importType: "schedules",
+        fileName: "历史排课回滚演示.xlsx",
+        totalRows: 3,
+        successRows: 3,
+        failedRows: 0,
+        status: "rolled_back",
+        result: { rows: [], createdIds: [] },
+        createdBy: userIds.manager,
+        importedAt: new Date(),
+        rolledBackAt: new Date(),
+      },
+    ],
+  });
+
   await prisma.aiMessage.createMany({
     data: [
       "低课时学生预警：李佳怡等 4 名学生低于 5 课时。",

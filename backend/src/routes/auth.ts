@@ -57,9 +57,9 @@ authRouter.post(
       },
     });
 
-    if (!user || user.status !== "ACTIVE" || !verifyPassword(password, user.passwordHash)) {
-      throw new AppError(401, "INVALID_CREDENTIALS", "邮箱或密码不正确");
-    }
+    if (!user) throw new AppError(401, "ACCOUNT_NOT_FOUND", "账号不存在，请检查邮箱或确认已执行 seed");
+    if (user.status !== "ACTIVE") throw new AppError(401, "ACCOUNT_DISABLED", "账号已停用，请联系管理员启用");
+    if (!verifyPassword(password, user.passwordHash)) throw new AppError(401, "INVALID_PASSWORD", "密码错误，请重新输入");
 
     await prisma.user.update({
       where: { id: user.id },

@@ -23,21 +23,11 @@ export const courseService = {
     if (filters?.category) params.set("category", filters.category);
     if (filters?.teachingMode) params.set("teachingMode", filters.teachingMode);
     if (filters?.status) params.set("status", filters.status);
-    return apiClient.requestWithFallback<Course[]>(
-      `/courses${params.toString() ? `?${params.toString()}` : ""}`,
-      { method: "GET" },
-      () => [...seedCourses],
-      courseApiState.list
-    );
+    return apiClient.request<Course[]>(`/courses${params.toString() ? `?${params.toString()}` : ""}`, { method: "GET" });
   },
 
   async listClasses(): Promise<Class[]> {
-    return apiClient.requestWithFallback<Class[]>(
-      "/classes",
-      { method: "GET" },
-      () => [...seedClasses],
-      courseApiState.classes
-    );
+    return apiClient.request<Class[]>("/classes", { method: "GET" });
   },
 
   async createCourse(data: Omit<Course, "id">): Promise<Course> {

@@ -3,13 +3,11 @@ import {
   Student, Course, Class, LessonRecord, Teacher,
   Competition, LeaveRecord, CreditTransaction, Assessment
 } from '../types';
-import { getInitialAppStateSync } from '../services/bootstrap';
 import { studentService } from '../services/studentService';
 import { courseService } from '../services/courseService';
 import { teacherService } from '../services/teacherService';
+import { useAuth } from './AuthContext';
 import toast from 'react-hot-toast';
-
-const initialState = getInitialAppStateSync();
 
 type AppContextType = {
   students: Student[];
@@ -64,15 +62,28 @@ type AppContextType = {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [students, setStudents] = useState<Student[]>(initialState.students);
-  const [courses, setCourses] = useState<Course[]>(initialState.courses);
-  const [classes, setClasses] = useState<Class[]>(initialState.classes);
-  const [teachers, setTeachers] = useState<Teacher[]>(initialState.teachers);
-  const [lessonRecords, setLessonRecords] = useState<LessonRecord[]>(initialState.lessonRecords);
-  const [leaveRecords, setLeaveRecords] = useState<LeaveRecord[]>(initialState.leaveRecords);
-  const [assessments, setAssessments] = useState<Assessment[]>(initialState.assessments);
-  const [competitions, setCompetitions] = useState<Competition[]>(initialState.competitions);
-  const [orders, setOrders] = useState<CreditTransaction[]>(initialState.orders);
+  const { user, token } = useAuth();
+  const [students, setStudents] = useState<Student[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [lessonRecords, setLessonRecords] = useState<LessonRecord[]>([]);
+  const [leaveRecords, setLeaveRecords] = useState<LeaveRecord[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [competitions, setCompetitions] = useState<Competition[]>([]);
+  const [orders, setOrders] = useState<CreditTransaction[]>([]);
+
+  const clearAppState = () => {
+    setStudents([]);
+    setCourses([]);
+    setClasses([]);
+    setTeachers([]);
+    setLessonRecords([]);
+    setLeaveRecords([]);
+    setAssessments([]);
+    setCompetitions([]);
+    setOrders([]);
+  };
 
   useEffect(() => {
     const handleApiError = (event: Event) => {
@@ -105,19 +116,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!user?.organizationId || !token) {
+      clearAppState();
+      return;
+    }
+
+    clearAppState();
     refreshStudents().catch(() => {
-      toast.error('学员列表加载失败，已保留本地 mock 数据');
+      toast.error('学员列表加载失败，请检查后端连接');
     });
     refreshCourses().catch(() => {
-      toast.error('课程列表加载失败，已保留本地 mock 数据');
+      toast.error('课程列表加载失败，请检查后端连接');
     });
     refreshClasses().catch(() => {
-      toast.error('班级列表加载失败，已保留本地 mock 数据');
+      toast.error('班级列表加载失败，请检查后端连接');
     });
     refreshTeachers().catch(() => {
-      toast.error('老师列表加载失败，已保留本地 mock 数据');
+      toast.error('老师列表加载失败，请检查后端连接');
     });
-  }, []);
+  }, [user?.organizationId, token]);
 
   const addStudent = async (studentData: Omit<Student, 'id'>) => {
     await studentService.createStudent(studentData);

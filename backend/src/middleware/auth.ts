@@ -28,6 +28,10 @@ const roleMap: Record<UserRole, MockUser["role"]> = {
 };
 
 export async function mockAuth(req: Request, _res: Response, next: NextFunction) {
+  if (req.method === "OPTIONS" || req.path === "/health" || req.path === "/api/health" || req.path === "/api/auth/login") {
+    return next();
+  }
+
   const token = req.header("authorization")?.replace(/^Bearer\s+/i, "");
   const payload = token ? verifyToken(token) : null;
   if (payload) {
@@ -47,13 +51,7 @@ export async function mockAuth(req: Request, _res: Response, next: NextFunction)
     return next();
   }
 
-  req.user = {
-    id: req.header("x-user-id") || "00000000-0000-0000-0000-000000000001",
-    organizationId: req.header("x-organization-id") || "01000000-0000-0000-0000-000000000001",
-    role: (req.header("x-user-role") as MockUser["role"]) || "admin",
-    displayName: req.header("x-user-name") || "Mock Admin",
-  };
-  next();
+  return next(new AppError(401, "UNAUTHORIZED", "请先登录"));
 }
 
 export function requireRoles(...roles: MockUser["role"][]) {

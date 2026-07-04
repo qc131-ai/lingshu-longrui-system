@@ -25,6 +25,8 @@ View your app in AI Studio: https://ai.studio/apps/a33c9ee7-0a47-4abf-b404-57fa8
    `npm run backend:dev`
 7. 启动前端：
    `npm run dev`
+8. 提交前综合检查：
+   `npm run check`
 
 ## Astralink 本地前后端联调
 
@@ -47,6 +49,12 @@ FRONTEND_URL="http://localhost:3000"
 NODE_ENV="development"
 ```
 
+环境差异：
+
+- local：前端 `http://localhost:3000`，后端 `http://localhost:4000`，`VITE_API_BASE_URL=http://localhost:3000/api` 通过 Vite proxy 转发。
+- staging：前端使用正式试用域名，后端使用 staging API 域名，`CORS_ORIGIN` 只允许试用前端域名，数据库可执行 seed 写入演示数据。
+- production：必须使用正式 migration、强随机 `JWT_SECRET`，不要执行演示 seed，不要使用测试账号密码。
+
 ### 后端
 
 ```bash
@@ -56,6 +64,14 @@ npm run backend:dev
 ```
 
 后端默认监听 `http://localhost:4000`。
+
+### 综合检查
+
+```bash
+npm run check
+```
+
+该命令会依次执行 `npm run lint`、`npm run backend:typecheck`、`npm run build`。
 
 ### 前端
 
@@ -98,6 +114,7 @@ npm run dev
 - 核心写操作记录 `operation_logs`
 - Excel 导入预览、确认导入、批次回滚、Excel 导出
 - 系统设置、用户账号管理、只读权限矩阵
+- 客户演示脚本、试用说明、反馈表和上线前检查清单
 - 前端核心 service 优先请求真实 API，失败时回退 mock，保留 loading/success/error 状态
 
 ### V1 Sprint 2 基础业务模块
@@ -113,13 +130,22 @@ Sprint 2 只覆盖四个基础业务模块，不包含排课、消课、家长�
 
 ### 测试账号
 
-| 角色 | 邮箱 | 密码 |
-|------|------|------|
-| 管理员 | `admin@longrui.com` | `admin123` |
-| 教务主管 | `academic@longrui.com` | `academic123` |
-| 顾问 | `advisor@longrui.com` | `advisor123` |
-| 老师 | `teacher@longrui.com` | `teacher123` |
-| 财务 | `finance@longrui.com` | `finance123` |
+以下账号仅用于本地 / staging 演示，生产环境必须修改密码。不同机构数据通过 `organizationId` 隔离，推荐演示时切换不同机构账号验证数据隔离。
+
+| 机构 | 管理员 | 教务主管 | 顾问 | 老师 | 财务 |
+|------|--------|----------|------|------|------|
+| 朗睿教育 | `admin@longrui.com / admin123` | `academic@longrui.com / academic123` | `advisor@longrui.com / advisor123` | `teacher@longrui.com / teacher123` | `finance@longrui.com / finance123` |
+| 我来教育 | `admin@wolai.com / admin123` | `academic@wolai.com / academic123` | `advisor@wolai.com / advisor123` | `teacher@wolai.com / teacher123` | `finance@wolai.com / finance123` |
+| 广外留学 | `admin@guangwai.com / admin123` | `academic@guangwai.com / academic123` | `advisor@guangwai.com / advisor123` | `teacher@guangwai.com / teacher123` | `finance@guangwai.com / finance123` |
+| AmazingX | `admin@amazingx.com / admin123` | `academic@amazingx.com / academic123` | `advisor@amazingx.com / advisor123` | `teacher@amazingx.com / teacher123` | `finance@amazingx.com / finance123` |
+
+新增多机构演示数据使用非破坏性 upsert 脚本：
+
+```bash
+npm run seed:demo-orgs
+```
+
+该脚本不会重置或删除朗睿教育 demo 数据。
 
 登录成功后前端会保存 token 到本地，并自动进入首页看板；退出登录会调用 `POST /api/auth/logout` 后清理本地登录态。
 
@@ -261,6 +287,14 @@ npm run build
 ```
 
 生产部署可将 `dist/` 托管到静态站点服务，将 `/api` 反向代理至后端服务。
+
+### 客户试用资料
+
+- 演示脚本：`docs/demo-script.md`
+- 试用说明：`docs/trial-guide.md`
+- 反馈表：`docs/trial-feedback-form.md`
+- 部署文档：`docs/deployment.md`
+- 上线前检查清单：`docs/release-checklist.md`
 
 ### 核心演示流程
 

@@ -34,12 +34,7 @@ function isMockStudentId(studentId: string) {
 
 export const studentService = {
   async list(): Promise<Student[]> {
-    return apiClient.requestWithFallback<Student[]>(
-      "/students",
-      { method: "GET" },
-      () => [...seedStudents],
-      studentApiState.list
-    );
+    return apiClient.request<Student[]>("/students", { method: "GET" });
   },
 
   /** 新增学员 */

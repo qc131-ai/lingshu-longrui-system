@@ -12,12 +12,7 @@ export const teacherApiState = {
 
 export const teacherService = {
   async list(): Promise<Teacher[]> {
-    return apiClient.requestWithFallback<Teacher[]>(
-      "/teachers",
-      { method: "GET" },
-      () => [...seedTeachers],
-      teacherApiState.list
-    );
+    return apiClient.request<Teacher[]>("/teachers", { method: "GET" });
   },
 
   async getTeacher(id: string): Promise<Teacher | null> {

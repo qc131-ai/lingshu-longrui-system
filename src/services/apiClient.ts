@@ -35,6 +35,7 @@ export class ApiClientError extends Error {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const ENABLE_MOCK_FALLBACK = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === "true";
 let lastErrorAt = 0;
 
 function emitApiError(message: string) {
@@ -162,6 +163,10 @@ export const apiClient = {
     } catch (error) {
       const message = error instanceof Error ? error.message : "API request failed";
       if (state) setApiError(state, message);
+      if (!ENABLE_MOCK_FALLBACK) {
+        emitApiError(`${errorLabel}：${message}`);
+        throw error;
+      }
       emitApiError(`${errorLabel}，已切换到本地 mock 数据：${message}`);
       return fallback();
     }
