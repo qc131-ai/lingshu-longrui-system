@@ -817,3 +817,22 @@ Sprint 5-3B 新增 `ai_actions`，用于持久化 DeepSeek AI Agent 返回的待
 - 顾问只能查看/确认自己生成的动作。
 - 老师、财务默认不能确认动作。
 - 所有读取和更新必须按 `organization_id` 过滤。
+
+### 12.1 Sprint 5-3C 执行结果落库
+
+5-3C 不新增表，复用 `ai_tasks` 保存低风险 AI 执行结果。`ai_actions` 负责确认动作状态机，`ai_tasks` 负责保存生成出来的草稿、跟进记录或处理备注。
+
+映射关系：
+
+| `ai_actions.action_type` | `ai_tasks.task_type` | 说明 |
+|--------------------------|----------------------|------|
+| `CREATE_PARENT_MESSAGE` | `chat` | 家长沟通草稿 |
+| `CREATE_ADVISOR_FOLLOW_UP` | `chat` | 顾问跟进记录 |
+| `GENERATE_RENEWAL_SUGGESTION` | `renewal_suggestion` | 续费建议草稿 |
+| `POLISH_PARENT_REPORT` | `parent_report_summary` | 报告润色草稿 |
+| `MARK_STUDENT_FOLLOW_UP_NEEDED` | `chat` | 学生跟进建议 |
+| `CREATE_LEAVE_MAKEUP_NOTE` | `chat` | 请假补课处理备注 |
+
+`ai_tasks.input_payload` 保存原始 action payload 和用户问题；`ai_tasks.output_payload` 保存生成内容、说明、关联学生名称和确认备注。`ai_actions.execution_result.taskId` 指向创建的 `ai_tasks.id`。
+
+执行边界：不会写入课时账户、课时流水、家长报告发送状态、用户权限、系统设置，也不会删除任何业务数据。

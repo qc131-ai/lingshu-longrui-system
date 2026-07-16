@@ -1094,3 +1094,20 @@ DeepSeek 仍只负责生成建议。后端会把允许范围内的 `proposedActi
 - 5-3B 的确认执行只写入 `ai_actions.executionResult`，不会自动扣课时、发送报告、发送消息、修改用户权限或修改业务主链数据。
 - 删除、扣课时、重置密码、导出数据、发送家长报告等高风险请求仍会被拒绝。
 - 确认和取消都会写入 `operation_logs`，日志失败不影响主流程。
+
+### Sprint 5-3C 受控执行器
+
+5-3C 在 5-3B 确认卡片基础上，开放低风险动作的受控执行。确认后后端会创建一条 `ai_tasks` 记录，并把 `taskId` 写入 `ai_actions.executionResult`，用于审计和后续详情化展示。
+
+当前允许的执行结果：
+
+| actionType | 执行结果 | 不会做的事 |
+|------------|----------|------------|
+| `CREATE_PARENT_MESSAGE` | 保存家长沟通草稿到 `ai_tasks` | 不自动发送给家长 |
+| `CREATE_ADVISOR_FOLLOW_UP` | 创建顾问跟进记录到 `ai_tasks` | 不自动推送外部通知 |
+| `GENERATE_RENEWAL_SUGGESTION` | 保存续费建议草稿到 `ai_tasks` | 不修改订单或课时 |
+| `POLISH_PARENT_REPORT` | 保存报告润色草稿到 `ai_tasks` | 不覆盖原家长报告 |
+| `MARK_STUDENT_FOLLOW_UP_NEEDED` | 保存学生跟进建议到 `ai_tasks` | 不直接修改学生业务状态 |
+| `CREATE_LEAVE_MAKEUP_NOTE` | 保存请假补课处理备注到 `ai_tasks` | 不审批、不排课 |
+
+仍然禁止：删除、扣课时、确认消课、发送报告/消息、修改用户权限、重置密码、导出数据、修改机构设置。所有执行前都会重新从 `ai_actions` 读取 payload，并校验 `organizationId` 和资源归属。

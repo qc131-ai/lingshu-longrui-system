@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import { AiActionStatus, AiMessageRole, AiQueryIntent, Prisma, type AiAction } from "@prisma/client";
+import { AiActionStatus, AiMessageRole, AiQueryIntent, AiTaskStatus, AiTaskType, Prisma, type AiAction } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { ok } from "../lib/response.js";
@@ -194,54 +194,117 @@ function toClientAiAction(action: AiAction) {
   };
 }
 
-function buildAiActionExecutionResult(action: AiAction, confirmationNote?: string): Record<string, unknown> {
-  const payload = action.payload && typeof action.payload === "object" && !Array.isArray(action.payload)
-    ? action.payload as Record<string, unknown>
-    : {};
-  const generatedAt = new Date().toISOString();
-  const text = typeof payload.message === "string"
+function optionalUuid(value: unknown) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : undefined;
+}
+
+function actionContent(action: AiAction, payload: Record<string, unknown>) {
+  return typeof payload.message === "string"
     ? payload.message
     : typeof payload.content === "string"
       ? payload.content
       : typeof payload.draft === "string"
         ? payload.draft
-        : action.description;
+        : typeof payload.note === "string"
+          ? payload.note
+          : typeof payload.suggestion === "string"
+            ? payload.suggestion
+            : typeof payload.polishedContent === "string"
+              ? payload.polishedContent
+              : action.description;
+}
 
-  const resultByType: Record<string, Record<string, unknown>> = {
-    CREATE_PARENT_MESSAGE: {
-      resultType: "parent_message_draft",
-      content: text,
-      note: "已生成家长沟通草稿，未自动发送给家长。",
-    },
-    CREATE_ADVISOR_FOLLOW_UP: {
-      resultType: "advisor_follow_up_note",
-      content: text,
-      note: "已生成顾问跟进建议，未自动创建外部通知。",
-    },
-    GENERATE_RENEWAL_SUGGESTION: {
-      resultType: "renewal_suggestion",
-      content: text,
-      note: "已生成续费建议草稿，未自动发送或修改订单。",
-    },
-    POLISH_PARENT_REPORT: {
-      resultType: "polished_report_draft",
-      content: text,
-      note: "已生成报告润色草稿，未自动覆盖原报告。",
-    },
-    MARK_STUDENT_FOLLOW_UP_NEEDED: {
-      resultType: "student_follow_up_marker",
-      content: text,
-      note: "已记录学生跟进建议，未修改学生业务状态。",
-    },
-    CREATE_LEAVE_MAKEUP_NOTE: {
-      resultType: "leave_makeup_note",
-      content: text,
-      note: "已生成请假补课处理备注，未自动审批或排课。",
-    },
+async function assertStudentInOrganization(studentId: string | undefined, organizationId: string) {
+  if (!studentId) return undefined;
+  const student = await prisma.student.findFirst({
+    where: { id: studentId, organizationId, deletedAt: null },
+    select: { id: true, name: true },
+  });
+  if (!student) throw new AppError(400, "AI_ACTION_INVALID_PAYLOAD", "AI 动作关联的学员不存在或不属于当前机构");
+  return student;
+}
+
+async function assertParentReportInOrganization(parentReportId: string | undefined, organizationId: string) {
+  if (!parentReportId) return undefined;
+  const report = await prisma.parentReport.findFirst({
+    where: { id: parentReportId, organizationId },
+    select: { id: true, studentId: true, studentName: true },
+  });
+  if (!report) throw new AppError(400, "AI_ACTION_INVALID_PAYLOAD", "AI 动作关联的家长报告不存在或不属于当前机构");
+  return report;
+}
+
+async function executeControlledAiAction(action: AiAction, confirmationNote?: string): Promise<Record<string, unknown>> {
+  const payload = action.payload && typeof action.payload === "object" && !Array.isArray(action.payload)
+    ? action.payload as Record<string, unknown>
+    : {};
+  const generatedAt = new Date().toISOString();
+  const content = actionContent(action, payload);
+  const studentId = optionalUuid(payload.studentId);
+  const parentReportId = optionalUuid(payload.reportId ?? payload.parentReportId);
+  const student = await assertStudentInOrganization(studentId, action.organizationId);
+  const report = await assertParentReportInOrganization(parentReportId, action.organizationId);
+  const taskTypeByAction: Record<string, AiTaskType> = {
+    CREATE_PARENT_MESSAGE: AiTaskType.CHAT,
+    CREATE_ADVISOR_FOLLOW_UP: AiTaskType.CHAT,
+    GENERATE_RENEWAL_SUGGESTION: AiTaskType.RENEWAL_SUGGESTION,
+    POLISH_PARENT_REPORT: AiTaskType.PARENT_REPORT_SUMMARY,
+    MARK_STUDENT_FOLLOW_UP_NEEDED: AiTaskType.CHAT,
+    CREATE_LEAVE_MAKEUP_NOTE: AiTaskType.CHAT,
   };
+  const resultTypeByAction: Record<string, string> = {
+    CREATE_PARENT_MESSAGE: "parent_message_draft",
+    CREATE_ADVISOR_FOLLOW_UP: "advisor_follow_up_record",
+    GENERATE_RENEWAL_SUGGESTION: "renewal_suggestion_draft",
+    POLISH_PARENT_REPORT: "polished_report_draft",
+    MARK_STUDENT_FOLLOW_UP_NEEDED: "student_follow_up_record",
+    CREATE_LEAVE_MAKEUP_NOTE: "leave_makeup_note",
+  };
+  const noteByAction: Record<string, string> = {
+    CREATE_PARENT_MESSAGE: "已保存家长沟通草稿，未自动发送给家长。",
+    CREATE_ADVISOR_FOLLOW_UP: "已创建顾问跟进记录，未自动发送外部通知。",
+    GENERATE_RENEWAL_SUGGESTION: "已保存续费建议草稿，未自动修改订单。",
+    POLISH_PARENT_REPORT: "已保存报告润色草稿，未自动覆盖原报告。",
+    MARK_STUDENT_FOLLOW_UP_NEEDED: "已记录学生跟进建议，未修改学生业务状态。",
+    CREATE_LEAVE_MAKEUP_NOTE: "已保存请假补课处理备注，未自动审批或排课。",
+  };
+  const outputPayload = {
+    actionId: action.id,
+    actionType: action.actionType,
+    title: action.title,
+    content,
+    note: noteByAction[action.actionType] ?? "已保存 AI 执行结果。",
+    studentName: student?.name ?? report?.studentName ?? null,
+    confirmationNote: confirmationNote ?? null,
+    generatedAt,
+  };
+  const task = await prisma.aiTask.create({
+    data: {
+      organizationId: action.organizationId,
+      userId: action.userId,
+      studentId: student?.id ?? report?.studentId ?? null,
+      parentReportId: report?.id ?? null,
+      taskType: taskTypeByAction[action.actionType] ?? AiTaskType.CHAT,
+      status: AiTaskStatus.COMPLETED,
+      inputPayload: JSON.parse(JSON.stringify({
+        actionId: action.id,
+        message: action.message,
+        payload,
+      })) as Prisma.InputJsonValue,
+      outputPayload: JSON.parse(JSON.stringify(outputPayload)) as Prisma.InputJsonValue,
+      startedAt: new Date(),
+      completedAt: new Date(),
+    },
+  });
 
   return {
-    ...(resultByType[action.actionType] ?? { resultType: "ai_action_result", content: text }),
+    resultType: resultTypeByAction[action.actionType] ?? "ai_action_result",
+    taskId: task.id,
+    content,
+    note: outputPayload.note,
+    studentName: outputPayload.studentName,
     confirmationNote: confirmationNote ?? null,
     generatedAt,
   };
@@ -1089,7 +1152,7 @@ aiRouter.post(
       throw new AppError(409, "AI_ACTION_EXPIRED", "该 AI 动作已过期，请重新生成建议");
     }
 
-    const executionResult = buildAiActionExecutionResult(action, req.body.confirmationNote);
+    const executionResult = await executeControlledAiAction(action, req.body.confirmationNote);
     const updated = await prisma.aiAction.update({
       where: { id: action.id },
       data: {

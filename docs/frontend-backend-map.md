@@ -371,3 +371,13 @@
 | **权限** | 管理员/教务主管可确认机构内动作；顾问只能确认自己生成的动作；老师/财务不可确认 |
 
 前端收到 `proposedActions` 后直接展示后端返回的 `id/status/expiresAt/executionResult`。确认或取消时只提交 action id，后端重新读取 `ai_actions` 并按 `organizationId`、角色和状态校验，避免前端篡改 payload。
+
+### 17.1 Sprint 5-3C 受控执行
+
+确认执行后，后端不再只返回临时结果，而是创建 `ai_tasks` 作为真实草稿/跟进记录：
+
+- 家长沟通话术、顾问跟进、学生跟进、请假补课备注：保存为 `AiTaskType.CHAT`。
+- 续费建议：保存为 `AiTaskType.RENEWAL_SUGGESTION`。
+- 家长报告润色：保存为 `AiTaskType.PARENT_REPORT_SUMMARY`。
+
+前端继续使用同一张确认卡片展示 `executionResult.content` 和 `executionResult.note`。`executionResult.taskId` 作为后续打开 AI 任务详情或草稿中心的预留字段。5-3C 仍不自动发送、不扣课时、不覆盖报告、不审批补课。
