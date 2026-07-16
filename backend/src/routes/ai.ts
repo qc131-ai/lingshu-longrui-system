@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import { AiActionStatus, AiMessageRole, AiQueryIntent, Prisma } from "@prisma/client";
+import { AiMessageRole, AiQueryIntent, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { ok } from "../lib/response.js";
@@ -10,7 +10,6 @@ import { logOperation } from "../lib/operationLog.js";
 import { validate } from "../middleware/validate.js";
 import {
   aiAssistantSchema,
-  confirmAiActionSchema,
   generateParentMessageSchema,
   generateRenewalSuggestionSchema,
   polishReportSchema,
@@ -19,9 +18,9 @@ import {
 import type { MockUser } from "../middleware/auth.js";
 import { AppError, notFound } from "../lib/errors.js";
 import { getAiProvider } from "../services/ai/aiProvider.js";
-import { saveProposedActions } from "../services/ai/aiActionPlanner.js";
-import { executeAiAction } from "../services/ai/aiActionExecutor.js";
 import { allowedAiActionTypes } from "../services/ai/aiSchemas.js";
+import { collectAiAgentData } from "../services/ai/aiDataCollector.js";
+import { sanitizeProviderResponse } from "../services/ai/aiSafety.js";
 
 export const aiRouter = Router();
 
@@ -189,49 +188,6 @@ function dateRangeInput(periodStart?: string, periodEnd?: string) {
   if (periodStart) where.gte = new Date(`${periodStart}T00:00:00.000Z`);
   if (periodEnd) where.lte = new Date(`${periodEnd}T23:59:59.999Z`);
   return Object.keys(where).length > 0 ? where : undefined;
-}
-
-function serializeAiAction(action: {
-  id: string;
-  actionType: string;
-  title: string;
-  description: string;
-  payload: Prisma.JsonValue;
-  status: string;
-  riskLevel: string;
-  confidence: Prisma.Decimal | number;
-  expiresAt: Date;
-  executedAt?: Date | null;
-  cancelledAt?: Date | null;
-  executionResult?: Prisma.JsonValue | null;
-  errorMessage?: string | null;
-  createdAt: Date;
-}) {
-  return {
-    id: action.id,
-    actionType: action.actionType,
-    title: action.title,
-    description: action.description,
-    payload: action.payload && typeof action.payload === "object" ? action.payload : {},
-    status: action.status.toLowerCase(),
-    riskLevel: action.riskLevel.toLowerCase(),
-    confidence: Number(action.confidence),
-    expiresAt: action.expiresAt.toISOString(),
-    executedAt: action.executedAt?.toISOString() ?? null,
-    cancelledAt: action.cancelledAt?.toISOString() ?? null,
-    executionResult: action.executionResult ?? null,
-    errorMessage: action.errorMessage ?? null,
-    createdAt: action.createdAt.toISOString(),
-    requiresConfirmation: action.status === "PROPOSED",
-  };
-}
-
-async function getOrganizationSummary(organizationId: string) {
-  const organization = await prisma.organization.findUnique({
-    where: { id: organizationId },
-    select: { id: true, name: true, code: true },
-  });
-  return organization ?? { id: organizationId, name: "当前机构", code: "" };
 }
 
 async function ensureStudentAccess(req: Parameters<typeof logOperation>[0], studentId: string, options: { allowTeacher?: boolean } = {}) {
@@ -921,137 +877,48 @@ aiRouter.post(
   "/agent",
   validate({ body: aiAssistantSchema }),
   asyncHandler(async (req, res) => {
-    const { message, sessionId = randomUUID(), context } = req.body;
+    const { message } = req.body;
     const intent = detectIntent(message);
     const teacherId = await teacherProfileId(req.user);
     const ctx: RequestContext = { user: req.user, teacherId };
 
     const baseResult = await handleAssistantRequest(intent, ctx);
-    const organization = await getOrganizationSummary(req.user.organizationId);
+    const aiData = await collectAiAgentData(ctx);
     const provider = getAiProvider();
     const providerResult = await provider.generateAssistantResponse({
       message,
       intent: baseResult.intent,
       userRole: req.user.role,
-      organization,
+      organization: aiData.organization,
       cards: baseResult.cards,
-      dataSummary: {
-        relatedData: baseResult.relatedData ?? {},
-        cardCount: baseResult.cards.length,
-      },
+      dataSummary: aiData.summary,
       allowedActions: [...allowedAiActionTypes],
     });
-
-    const savedActions = await saveProposedActions({
-      user: req.user,
-      proposedActions: providerResult.proposedActions,
-      confidence: providerResult.confidence,
-    });
-
-    await logAiOperation(req, "ai_agent_query", {
-      intent: providerResult.intent,
-      provider: process.env.AI_PROVIDER ?? "mock",
-      hasDeepSeekKey: Boolean(process.env.DEEPSEEK_API_KEY),
-      proposedActionCount: savedActions.length,
-      context,
-    });
-    if (savedActions.length > 0) {
-      await logAiOperation(req, "ai_proposed_action_created", {
-        actionIds: savedActions.map((action) => action.id),
-        actionTypes: savedActions.map((action) => action.actionType),
-      });
-    }
+    const safeProviderResult = sanitizeProviderResponse(providerResult, message);
+    const providerName = process.env.AI_PROVIDER === "deepseek" && process.env.DEEPSEEK_API_KEY ? "deepseek" : "mock";
+    const isRestrictedAction = safeProviderResult.intent === "restricted_action";
 
     const result = {
-      answer: providerResult.answer || baseResult.answer,
-      intent: providerResult.intent || baseResult.intent,
-      cards: providerResult.cards.length > 0 ? providerResult.cards : baseResult.cards,
-      actions: baseResult.actions,
-      proposedActions: savedActions,
-      warnings: providerResult.warnings,
-      confidence: providerResult.confidence,
-      relatedData: {
-        ...(baseResult.relatedData ?? {}),
-        provider: process.env.AI_PROVIDER === "deepseek" && process.env.DEEPSEEK_API_KEY ? "deepseek" : "mock",
-      },
+      answer: safeProviderResult.answer || baseResult.answer,
+      intent: safeProviderResult.intent || baseResult.intent,
+      cards: isRestrictedAction ? [] : safeProviderResult.cards.length > 0 ? safeProviderResult.cards : baseResult.cards,
+      actions: isRestrictedAction ? [] : baseResult.actions,
+      proposedActions: safeProviderResult.proposedActions,
+      warnings: safeProviderResult.warnings,
+      confidence: safeProviderResult.confidence,
+      provider: providerName,
+      relatedData: isRestrictedAction ? {} : baseResult.relatedData ?? {},
     };
 
-    const structuredResult = JSON.parse(JSON.stringify(result)) as Prisma.InputJsonValue;
-    await prisma.aiMessage.createMany({
-      data: [
-        {
-          organizationId: req.user.organizationId,
-          userId: req.user.id,
-          sessionId,
-          role: AiMessageRole.USER,
-          content: message,
-        },
-        {
-          organizationId: req.user.organizationId,
-          userId: req.user.id,
-          sessionId,
-          role: AiMessageRole.ASSISTANT,
-          content: result.answer,
-          intent: mapStoredIntent(baseResult.intent),
-          structuredResult,
-        },
-      ],
+    await logAiOperation(req, "ai_agent_query", {
+      intent: result.intent,
+      provider: providerName,
+      cardCount: result.cards.length,
+      proposedActionCount: result.proposedActions.length,
+      warningCount: result.warnings.length,
     });
 
     return ok(res, result);
-  })
-);
-
-aiRouter.get(
-  "/actions",
-  asyncHandler(async (req, res) => {
-    const actions = await prisma.aiAction.findMany({
-      where: {
-        organizationId: req.user.organizationId,
-        ...(req.user.role === "admin" || req.user.role === "academic_manager" ? {} : { userId: req.user.id }),
-      },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
-    return ok(res, { actions: actions.map(serializeAiAction) });
-  })
-);
-
-aiRouter.post(
-  "/actions/confirm",
-  validate({ body: confirmAiActionSchema }),
-  asyncHandler(async (req, res) => {
-    const { actionId, actionType } = req.body;
-    const { action, result } = await executeAiAction({ user: req.user, actionId, actionType });
-    await logAiOperation(req, "ai_action_confirmed", { actionId, actionType });
-    await logAiOperation(req, "ai_action_executed", { actionId, actionType, result });
-    return ok(res, {
-      success: true,
-      executedAction: serializeAiAction(action),
-      message: "AI 动作已执行",
-      result,
-    });
-  })
-);
-
-aiRouter.post(
-  "/actions/:id/cancel",
-  asyncHandler(async (req, res) => {
-    const action = await prisma.aiAction.findFirst({
-      where: {
-        id: req.params.id,
-        organizationId: req.user.organizationId,
-        ...(req.user.role === "admin" || req.user.role === "academic_manager" ? {} : { userId: req.user.id }),
-      },
-    });
-    if (!action) throw notFound("AI action");
-    if (action.status !== AiActionStatus.PROPOSED) throw new AppError(409, "CONFLICT", "该 AI 动作当前不能取消");
-    const updated = await prisma.aiAction.update({
-      where: { id: action.id },
-      data: { status: AiActionStatus.CANCELLED, cancelledAt: new Date() },
-    });
-    await logAiOperation(req, "ai_action_cancelled", { actionId: updated.id, actionType: updated.actionType });
-    return ok(res, { action: serializeAiAction(updated), message: "AI 动作已取消" });
   })
 );
 

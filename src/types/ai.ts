@@ -47,6 +47,7 @@ export type AIQueryResult = {
   proposedActions?: AIProposedAction[];
   warnings?: string[];
   confidence?: number;
+  provider?: "deepseek" | "mock";
   relatedData?: Record<string, unknown>;
 };
 
@@ -71,13 +72,6 @@ export type AIProposedAction = {
   executionResult?: Record<string, unknown> | null;
   errorMessage?: string | null;
   requiresConfirmation: boolean;
-};
-
-export type AIActionExecutionResult = {
-  success: boolean;
-  executedAction: AIProposedAction;
-  message: string;
-  result?: Record<string, unknown>;
 };
 
 export type RenewalSuggestion = {

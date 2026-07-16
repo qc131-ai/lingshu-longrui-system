@@ -1,31 +1,39 @@
-import { AiActionType, type Prisma } from "@prisma/client";
-import type { MockUser } from "../../middleware/auth.js";
-import { AppError } from "../../lib/errors.js";
-import type { AllowedAiActionType } from "./aiSchemas.js";
+import { aiProposedActionSchema, forbiddenAiActionTypes, type AiProviderResponse } from "./aiSchemas.js";
 
-export function prismaActionType(actionType: AllowedAiActionType): AiActionType {
-  return actionType as AiActionType;
+const highRiskPatterns = [
+  /删除|删掉|清空|drop|delete/i,
+  /扣课时|消课|扣减|扣除|改余额|修改余额/i,
+  /发送报告|发报告|发送给家长|发给家长/i,
+  /改权限|修改权限|角色|管理员权限/i,
+  /重置密码|改密码|创建用户|新增用户/i,
+  /导出|下载全部|导出数据/i,
+];
+
+export function detectForbiddenRequest(message: string) {
+  if (!highRiskPatterns.some((pattern) => pattern.test(message))) return null;
+  return "该请求涉及删除、扣课时、发送、权限、密码或导出等高风险操作。本阶段 AI Agent 只能查询和生成待确认建议，不会执行该类动作。";
 }
 
-export function isActionAllowedForRole(user: MockUser, actionType: AllowedAiActionType) {
-  if (user.role === "admin") return true;
-  if (user.role === "academic_manager") return true;
-  if (user.role === "advisor") {
-    return ["CREATE_PARENT_MESSAGE", "CREATE_ADVISOR_FOLLOW_UP", "GENERATE_RENEWAL_SUGGESTION", "MARK_STUDENT_FOLLOW_UP_NEEDED"].includes(actionType);
+export function sanitizeProviderResponse(input: AiProviderResponse, message: string): AiProviderResponse {
+  const forbiddenWarning = detectForbiddenRequest(message);
+  if (forbiddenWarning) {
+    return {
+      answer: "我不能执行或建议这类高风险操作。本阶段可以帮你查询数据、生成沟通草稿或提出低风险待确认动作。",
+      intent: input.intent || "restricted_action",
+      cards: [],
+      proposedActions: [],
+      warnings: [...input.warnings, forbiddenWarning],
+      confidence: Math.min(input.confidence, 0.4),
+    };
   }
-  if (user.role === "teacher") {
-    return actionType === "POLISH_PARENT_REPORT" || actionType === "CREATE_LEAVE_MAKEUP_NOTE";
-  }
-  return false;
-}
 
-export function assertActionAllowedForRole(user: MockUser, actionType: AllowedAiActionType) {
-  if (!isActionAllowedForRole(user, actionType)) {
-    throw new AppError(403, "FORBIDDEN", "当前账号无权确认该 AI 动作");
-  }
-}
+  const proposedActions = input.confidence < 0.5
+    ? []
+    : input.proposedActions
+        .map((action) => aiProposedActionSchema.safeParse(action))
+        .filter((result): result is { success: true; data: typeof input.proposedActions[number] } => result.success)
+        .map((result) => result.data)
+        .filter((action) => !forbiddenAiActionTypes.includes(action.actionType as never));
 
-export function jsonClone(value: unknown): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
+  return { ...input, proposedActions };
 }
-

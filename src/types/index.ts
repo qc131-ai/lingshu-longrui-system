@@ -16,7 +16,6 @@ export type {
   AIChatHistoryItem,
   AICard,
   AICardAction,
-  AIActionExecutionResult,
   AIMessage,
   AIProposedAction,
   AIQueryIntent,

@@ -432,21 +432,6 @@ export const aiAssistantSchema = z.object({
   context: z.record(z.string(), z.unknown()).optional(),
 });
 
-export const aiActionTypeSchema = z.enum([
-  "CREATE_PARENT_MESSAGE",
-  "CREATE_ADVISOR_FOLLOW_UP",
-  "GENERATE_RENEWAL_SUGGESTION",
-  "POLISH_PARENT_REPORT",
-  "MARK_STUDENT_FOLLOW_UP_NEEDED",
-  "CREATE_LEAVE_MAKEUP_NOTE",
-]);
-
-export const confirmAiActionSchema = z.object({
-  actionId: z.string().uuid(),
-  actionType: aiActionTypeSchema,
-  payload: z.record(z.string(), z.unknown()).optional(),
-});
-
 export const aiToneSchema = z.enum(["professional", "friendly", "urgent", "warm", "concise"]).optional();
 
 export const generateRenewalSuggestionSchema = z.object({

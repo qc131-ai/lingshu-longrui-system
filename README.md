@@ -244,7 +244,7 @@ Sprint 4-3 在 AI 教务助手中增加规则型内容生成能力。当前阶�
 
 ### Sprint 5-3 DeepSeek AI Agent
 
-Sprint 5-3 新增 DeepSeek provider 和可确认执行卡片。AI 只生成 `proposedActions`，不会直接修改数据库；用户点击确认后，后端 `/api/ai/actions/confirm` 会重新读取数据库中的 action、校验当前用户权限和 `organizationId`，再执行低风险动作。
+Sprint 5-3 第一阶段新增 DeepSeek provider 和展示型 `proposedActions`。AI 只返回结构化回答、数据卡片和建议动作，不保存 action、不执行 action、不修改数据库。确认执行、`AiAction` 表和 action executor 放到第二阶段。
 
 后端环境变量：
 
@@ -262,16 +262,8 @@ DEEPSEEK_MODEL="deepseek-v4-flash"
 新增接口：
 
 - `POST /api/ai/agent`：基于真实机构数据返回回答、结果卡片和 `proposedActions`。
-- `GET /api/ai/actions`：查询最近 AI 动作。
-- `POST /api/ai/actions/confirm`：确认执行 action。
-- `POST /api/ai/actions/:id/cancel`：取消 action。
 
-新增 Prisma model：`AiAction`。首次部署后需要执行：
-
-```bash
-npm run prisma:generate
-npm run prisma:push
-```
+本阶段不新增 Prisma model，不需要数据库 schema 同步。前端确认按钮显示“下一阶段开放”。
 
 ### 系统设置与用户管理
 

@@ -58,12 +58,7 @@ npm run seed
 
 生产环境建议使用正式 migration 流程；当前仓库 MVP 阶段以 `prisma db push` 作为本地和 staging 同步方式。
 
-如启用 Sprint 5-3 AI Agent，`AiAction` 表需要同步到数据库：
-
-```bash
-npm run prisma:generate
-npm run prisma:push
-```
+Sprint 5-3 第一阶段仅新增 DeepSeek provider 和 `/api/ai/agent`，不新增 Prisma schema，不需要为 AI Agent 执行额外 `prisma:push`。第二阶段如增加 `AiAction` 表，再按当期说明同步数据库。
 
 ## 前端 API 地址
 

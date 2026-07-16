@@ -1,6 +1,5 @@
 import type {
   AIChatHistoryItem,
-  AIActionExecutionResult,
   AIQueryResult,
   AIProposedAction,
   ParentMessageResult,
@@ -88,6 +87,7 @@ function normalizeAiResult(payload: unknown): AIQueryResult {
       proposedActions,
       warnings,
       confidence: typeof raw.confidence === "number" ? raw.confidence : undefined,
+      provider: raw.provider === "deepseek" ? "deepseek" : "mock",
       relatedData: raw.relatedData && typeof raw.relatedData === "object" ? (raw.relatedData as Record<string, unknown>) : undefined,
     };
   }
@@ -170,23 +170,6 @@ export const aiService = {
       setApiError(aiApiState.query, messageText);
       throw error;
     }
-  },
-
-  async confirmAction(action: AIProposedAction): Promise<AIActionExecutionResult> {
-    return apiClient.request<AIActionExecutionResult>("/ai/actions/confirm", {
-      method: "POST",
-      body: JSON.stringify({
-        actionId: action.id,
-        actionType: action.actionType,
-        payload: action.payload ?? {},
-      }),
-    });
-  },
-
-  async cancelAction(actionId: string): Promise<{ action: AIProposedAction; message: string }> {
-    return apiClient.request<{ action: AIProposedAction; message: string }>(`/ai/actions/${actionId}/cancel`, {
-      method: "POST",
-    });
   },
 
   /** 生成续费建议 */

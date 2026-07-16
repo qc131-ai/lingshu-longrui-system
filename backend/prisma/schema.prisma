@@ -178,29 +178,6 @@ enum AiTaskStatus {
   FAILED     @map("failed")
 }
 
-enum AiActionType {
-  CREATE_PARENT_MESSAGE       @map("CREATE_PARENT_MESSAGE")
-  CREATE_ADVISOR_FOLLOW_UP    @map("CREATE_ADVISOR_FOLLOW_UP")
-  GENERATE_RENEWAL_SUGGESTION @map("GENERATE_RENEWAL_SUGGESTION")
-  POLISH_PARENT_REPORT        @map("POLISH_PARENT_REPORT")
-  MARK_STUDENT_FOLLOW_UP_NEEDED @map("MARK_STUDENT_FOLLOW_UP_NEEDED")
-  CREATE_LEAVE_MAKEUP_NOTE    @map("CREATE_LEAVE_MAKEUP_NOTE")
-}
-
-enum AiActionStatus {
-  PROPOSED  @map("proposed")
-  EXECUTED  @map("executed")
-  CANCELLED @map("cancelled")
-  EXPIRED   @map("expired")
-  FAILED    @map("failed")
-}
-
-enum AiRiskLevel {
-  LOW    @map("low")
-  MEDIUM @map("medium")
-  HIGH   @map("high")
-}
-
 model Organization {
   id        String   @id @default(uuid()) @db.Uuid
   name      String   @db.VarChar(200)
@@ -226,7 +203,6 @@ model Organization {
   parentReports       ParentReport[]
   aiMessages          AiMessage[]
   aiTasks             AiTask[]
-  aiActions           AiAction[]
   operationLogs       OperationLog[]
   files               UploadedFile[]
   importLogs          ImportLog[]
@@ -288,7 +264,6 @@ model User {
   sentParentReports    ParentReport[]      @relation("ParentReportSender")
   aiMessages          AiMessage[]
   aiTasks             AiTask[]
-  aiActions           AiAction[]
   operationLogs       OperationLog[]
   uploadedFiles       UploadedFile[]
   orders              Order[]
@@ -874,34 +849,6 @@ model AiTask {
   @@index([status, taskType])
   @@index([studentId])
   @@map("ai_tasks")
-}
-
-model AiAction {
-  id              String         @id @default(uuid()) @db.Uuid
-  organizationId  String         @map("organization_id") @db.Uuid
-  userId          String         @map("user_id") @db.Uuid
-  actionType      AiActionType   @map("action_type")
-  title           String         @db.VarChar(200)
-  description     String
-  payload         Json
-  status          AiActionStatus @default(PROPOSED)
-  riskLevel       AiRiskLevel    @default(LOW) @map("risk_level")
-  confidence      Decimal        @default(0) @db.Decimal(4, 3)
-  expiresAt       DateTime       @map("expires_at") @db.Timestamptz
-  executedAt      DateTime?      @map("executed_at") @db.Timestamptz
-  cancelledAt     DateTime?      @map("cancelled_at") @db.Timestamptz
-  executionResult Json?          @map("execution_result")
-  errorMessage    String?        @map("error_message")
-  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
-
-  organization Organization @relation(fields: [organizationId], references: [id])
-  user         User         @relation(fields: [userId], references: [id])
-
-  @@index([organizationId, status, createdAt])
-  @@index([userId, status, createdAt])
-  @@index([actionType])
-  @@map("ai_actions")
 }
 
 model OperationLog {

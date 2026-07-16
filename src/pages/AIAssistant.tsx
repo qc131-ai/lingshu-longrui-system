@@ -73,7 +73,6 @@ export function AIAssistant() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string | ReactNode }[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const [actionOverrides, setActionOverrides] = useState<Record<string, AIProposedAction>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -249,84 +248,40 @@ export function AIAssistant() {
     toast.success(action.message ?? `${action.label}已生成`);
   };
 
-  const updateActionInMessages = (actionId: string, nextAction: AIProposedAction) => {
-    setActionOverrides(prev => ({ ...prev, [actionId]: nextAction }));
-  };
-
-  const handleConfirmProposedAction = async (action: AIProposedAction) => {
-    if (action.status !== 'proposed') return;
-    const confirmed = window.confirm(`确认执行：${action.title}？\n\n系统会由后端再次校验权限和数据归属。`);
-    if (!confirmed) return;
-    setIsTyping(true);
-    try {
-      const result = await aiService.confirmAction(action);
-      toast.success(result.message || 'AI 动作已执行');
-      updateActionInMessages(action.id, result.executedAction);
-      appendAiText(`执行结果：${result.message || 'AI 动作已执行'}。`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'AI 动作执行失败';
-      toast.error(message);
-      appendAiText(`AI 动作执行失败：${message}`);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  const handleCancelProposedAction = async (action: AIProposedAction) => {
-    if (action.status !== 'proposed') return;
-    setIsTyping(true);
-    try {
-      const result = await aiService.cancelAction(action.id);
-      toast.success(result.message || 'AI 动作已取消');
-      updateActionInMessages(action.id, result.action);
-      appendAiText(`已取消动作：${action.title}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'AI 动作取消失败';
-      toast.error(message);
-      appendAiText(`AI 动作取消失败：${message}`);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
   const ProposedActionCard = ({ action }: { action: AIProposedAction }) => {
-    const current = actionOverrides[action.id] ?? action;
-    const disabled = current.status !== 'proposed';
     return (
             <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm">
               <div className="flex justify-between items-start gap-3 mb-3">
                 <div>
-                  <div className="text-xs text-purple-600 font-semibold mb-1">{actionTypeLabel(current.actionType)}</div>
-                  <div className="font-bold text-gray-900">{safeText(current.title, '待确认动作')}</div>
-                  <div className="text-sm text-gray-500 mt-1">{safeText(current.description)}</div>
+                  <div className="text-xs text-purple-600 font-semibold mb-1">{actionTypeLabel(action.actionType)}</div>
+                  <div className="font-bold text-gray-900">{safeText(action.title, '待确认动作')}</div>
+                  <div className="text-sm text-gray-500 mt-1">{safeText(action.description)}</div>
                 </div>
-                <span className={`shrink-0 px-2 py-0.5 text-xs rounded-full border ${actionRiskClass(current.riskLevel)}`}>
-                  {current.riskLevel === 'medium' ? '中风险' : current.riskLevel === 'high' ? '高风险' : '低风险'}
+                <span className={`shrink-0 px-2 py-0.5 text-xs rounded-full border ${actionRiskClass(action.riskLevel)}`}>
+                  {action.riskLevel === 'medium' ? '中风险' : action.riskLevel === 'high' ? '高风险' : '低风险'}
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-600 mb-3">
-                <div>状态：<span className="font-medium text-gray-800">{actionStatusLabel(current.status)}</span></div>
-                <div>置信度：<span className="font-medium text-gray-800">{Math.round((current.confidence ?? 0) * 100)}%</span></div>
-                <div>过期时间：<span className="font-medium text-gray-800">{new Date(current.expiresAt).toLocaleString()}</span></div>
+                <div>状态：<span className="font-medium text-gray-800">{actionStatusLabel(action.status)}</span></div>
+                <div>置信度：<span className="font-medium text-gray-800">{Math.round((action.confidence ?? 0) * 100)}%</span></div>
+                <div>执行方式：<span className="font-medium text-gray-800">下一阶段开放</span></div>
               </div>
-              {current.errorMessage && <div className="text-xs text-red-600 mb-3">{current.errorMessage}</div>}
+              {action.errorMessage && <div className="text-xs text-red-600 mb-3">{action.errorMessage}</div>}
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => toast.success('该动作将在后端按当前机构和权限校验后执行')}
+                  onClick={() => toast.success('本阶段只展示建议动作，下一阶段开放确认执行')}
                   className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50"
                 >
                   查看详情
                 </button>
                 <button
-                  onClick={() => handleConfirmProposedAction(current)}
-                  disabled={disabled || isTyping}
+                  disabled
                   className="px-3 py-1.5 text-xs font-medium text-white bg-purple-600 border border-purple-600 rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {current.status === 'executed' ? '已执行' : '确认执行'}
+                  下一阶段开放
                 </button>
                 <button
-                  onClick={() => handleCancelProposedAction(current)}
-                  disabled={disabled || isTyping}
+                  disabled
                   className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   取消
@@ -350,8 +305,15 @@ export function AIAssistant() {
     const actions = asArray(result?.actions);
     const proposedActions = asArray(result?.proposedActions);
     const warnings = asArray(result?.warnings);
+    const providerLabel = result?.provider === 'deepseek' ? 'DeepSeek' : 'Mock AI';
     return (
       <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className={`px-2 py-0.5 text-xs rounded-full ${result?.provider === 'deepseek' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+          {providerLabel}
+        </span>
+        {typeof result?.confidence === 'number' && <span className="text-xs text-gray-400">置信度 {Math.round(result.confidence * 100)}%</span>}
+      </div>
       <p>{safeText(result?.answer, 'AI 助手暂时没有返回可展示的数据，请换一个问题再试。')}</p>
       {warnings.length > 0 && (
         <div className="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg p-3">

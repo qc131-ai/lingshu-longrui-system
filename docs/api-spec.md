@@ -807,44 +807,21 @@ DeepSeek 仅在后端调用，使用 OpenAI-compatible Chat Completion。前端�
   "actions": [],
   "proposedActions": [
     {
-      "id": "uuid",
       "actionType": "CREATE_PARENT_MESSAGE",
       "title": "生成家长沟通话术",
       "description": "给学生家长生成低课时提醒",
       "payload": { "studentId": "uuid" },
-      "status": "proposed",
       "riskLevel": "low",
-      "confidence": 0.82,
-      "expiresAt": "2026-07-15T10:30:00.000Z",
       "requiresConfirmation": true
     }
   ],
   "warnings": [],
-  "confidence": 0.82
+  "confidence": 0.82,
+  "provider": "mock"
 }
 ```
 
-#### POST /api/ai/actions/confirm
-
-请求：
-
-```json
-{
-  "actionId": "uuid",
-  "actionType": "CREATE_PARENT_MESSAGE",
-  "payload": {}
-}
-```
-
-后端不会信任前端 `payload`，只用 `actionId` 重新读取数据库中的 action，并重新校验当前用户权限、`organizationId`、过期时间、状态和关联对象归属。
-
-#### GET /api/ai/actions
-
-查询当前用户最近 AI proposed / executed / cancelled actions。管理员和教务主管可看当前机构 actions，其他角色只看自己创建的 actions。
-
-#### POST /api/ai/actions/:id/cancel
-
-取消 `proposed` 状态的 AI action。已执行、已取消、已过期的 action 不可取消。
+第一阶段说明：`proposedActions` 只返回给前端展示，不保存、不确认、不执行、不修改数据库。前端按钮显示“下一阶段开放”。`AiAction` 表、确认 API 和 action executor 将在 Sprint 5-3 第二阶段实现。
 
 允许的低风险 `actionType`：
 
