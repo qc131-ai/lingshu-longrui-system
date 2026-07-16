@@ -130,6 +130,7 @@
 - `docs/client-feedback-form.md`：客户填写的模块化反馈表。
 - `docs/trial-issue-log-template.md`：项目组内部登记、分级、复现和验收问题。
 - `docs/sprint-5-6-trial-support-playbook.md`：客户试用期间的问题处理规则和 Go / No-Go 标准。
+- `docs/sprint-5-7-trial-feedback-summary.md`：首轮客户试用反馈汇总和 Go / No-Go 结论。
 
 ## 9. 联系方式
 
