@@ -8,6 +8,15 @@
 
 本手册基于当前项目真实结构整理，适用于 `codex-sprint-3` staging 部署。
 
+当前 staging 环境：
+
+- 前端：`https://lingshu-longrui-system.vercel.app`
+- 后端：`https://astralink-backend-staging.onrender.com`
+- Health：`https://astralink-backend-staging.onrender.com/api/health`
+- 数据库：Neon PostgreSQL
+
+这是 staging 测试环境。默认测试账号仅用于 staging / 演示，生产环境必须更换密码。Render 免费实例可能会休眠，首次访问较慢属于可接受现象。
+
 ## 1. 当前项目结构判断
 
 ### 前端
@@ -30,7 +39,7 @@
 前端 API 环境变量：
 
 ```env
-VITE_API_BASE_URL="https://你的-render-backend-url.onrender.com/api"
+VITE_API_BASE_URL="https://astralink-backend-staging.onrender.com/api"
 ```
 
 当前代码读取位置：
@@ -628,4 +637,3 @@ openssl rand -hex 32
 ```bash
 curl https://你的-render-backend-url.onrender.com/api/health
 ```
-

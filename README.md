@@ -8,6 +8,15 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/a33c9ee7-0a47-4abf-b404-57fa84f5b4d6
 
+## Staging 环境
+
+- 前端：`https://lingshu-longrui-system.vercel.app`
+- 后端：`https://astralink-backend-staging.onrender.com`
+- Health：`https://astralink-backend-staging.onrender.com/api/health`
+- 数据库：Neon PostgreSQL
+
+这是 staging 测试环境。默认测试账号仅用于 staging / 演示，生产环境必须更换密码。Render 免费实例可能会休眠，首次访问较慢属于可接受现象。
+
 ## Run Locally
 
 **Prerequisites:** Node.js 20+、PostgreSQL 15+
@@ -232,6 +241,37 @@ Sprint 4-3 在 AI 教务助手中增加规则型内容生成能力。当前阶�
 数据来源：`students`、`credit_accounts`、`lesson_records`、`leave_makeup_requests`、`parent_reports`。所有接口由后端从 token 读取 `organizationId`，前端不要传 `organizationId`；返回内容不得暴露 `internalNotes`、`operation_logs` 或跨机构数据。
 
 权限规则：管理员和教务主管可使用全部生成功能；顾问只能为自己负责学生生成续费建议和家长话术；老师不能生成续费建议；财务不能生成家长沟通话术和报告润色。
+
+### Sprint 5-3 DeepSeek AI Agent
+
+Sprint 5-3 新增 DeepSeek provider 和可确认执行卡片。AI 只生成 `proposedActions`，不会直接修改数据库；用户点击确认后，后端 `/api/ai/actions/confirm` 会重新读取数据库中的 action、校验当前用户权限和 `organizationId`，再执行低风险动作。
+
+后端环境变量：
+
+```env
+AI_PROVIDER="deepseek"
+AI_MODE="staging"
+AI_TIMEOUT_MS=30000
+DEEPSEEK_API_KEY="<render-only-secret>"
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
+DEEPSEEK_MODEL="deepseek-v4-flash"
+```
+
+本地没有 `DEEPSEEK_API_KEY` 时会自动 fallback 到规则型 mock AI，不会返回 500。DeepSeek API Key 只能配置在后端 Render，不要放到 Vercel 或前端环境变量。
+
+新增接口：
+
+- `POST /api/ai/agent`：基于真实机构数据返回回答、结果卡片和 `proposedActions`。
+- `GET /api/ai/actions`：查询最近 AI 动作。
+- `POST /api/ai/actions/confirm`：确认执行 action。
+- `POST /api/ai/actions/:id/cancel`：取消 action。
+
+新增 Prisma model：`AiAction`。首次部署后需要执行：
+
+```bash
+npm run prisma:generate
+npm run prisma:push
+```
 
 ### 系统设置与用户管理
 

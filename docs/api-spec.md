@@ -784,6 +784,92 @@ pending -> cancelled
 
 规则：`remainingHours <= 3` 为高优先级，`<= 5` 为中高优先级；如有未处理请假补课，建议先处理服务问题；如报告未发送，建议先发送报告再推进续费。
 
+### Sprint 5-3 DeepSeek AI Agent API
+
+DeepSeek 仅在后端调用，使用 OpenAI-compatible Chat Completion。前端不得接触 `DEEPSEEK_API_KEY`。如果后端未配置 `DEEPSEEK_API_KEY`，系统 fallback 到规则型 mock AI，不返回 500。
+
+#### POST /api/ai/agent
+
+请求：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| message | string | 是 | 用户自然语言问题 |
+| context | object | 否 | 前端上下文，不得包含 organizationId |
+
+返回：
+
+```json
+{
+  "answer": "自然语言回答",
+  "intent": "low_credit_students",
+  "cards": [],
+  "actions": [],
+  "proposedActions": [
+    {
+      "id": "uuid",
+      "actionType": "CREATE_PARENT_MESSAGE",
+      "title": "生成家长沟通话术",
+      "description": "给学生家长生成低课时提醒",
+      "payload": { "studentId": "uuid" },
+      "status": "proposed",
+      "riskLevel": "low",
+      "confidence": 0.82,
+      "expiresAt": "2026-07-15T10:30:00.000Z",
+      "requiresConfirmation": true
+    }
+  ],
+  "warnings": [],
+  "confidence": 0.82
+}
+```
+
+#### POST /api/ai/actions/confirm
+
+请求：
+
+```json
+{
+  "actionId": "uuid",
+  "actionType": "CREATE_PARENT_MESSAGE",
+  "payload": {}
+}
+```
+
+后端不会信任前端 `payload`，只用 `actionId` 重新读取数据库中的 action，并重新校验当前用户权限、`organizationId`、过期时间、状态和关联对象归属。
+
+#### GET /api/ai/actions
+
+查询当前用户最近 AI proposed / executed / cancelled actions。管理员和教务主管可看当前机构 actions，其他角色只看自己创建的 actions。
+
+#### POST /api/ai/actions/:id/cancel
+
+取消 `proposed` 状态的 AI action。已执行、已取消、已过期的 action 不可取消。
+
+允许的低风险 `actionType`：
+
+- `CREATE_PARENT_MESSAGE`
+- `CREATE_ADVISOR_FOLLOW_UP`
+- `GENERATE_RENEWAL_SUGGESTION`
+- `POLISH_PARENT_REPORT`
+- `MARK_STUDENT_FOLLOW_UP_NEEDED`
+- `CREATE_LEAVE_MAKEUP_NOTE`
+
+禁止的高风险动作：
+
+- `DELETE_ANYTHING`
+- `UPDATE_CREDIT_BALANCE`
+- `CONFIRM_CREDIT_DEDUCTION`
+- `SEND_PARENT_REPORT`
+- `SEND_MESSAGE_TO_PARENT`
+- `CHANGE_USER_ROLE`
+- `RESET_PASSWORD`
+- `CREATE_USER`
+- `UPDATE_ORGANIZATION_SETTINGS`
+- `EXPORT_DATA`
+
+权限：管理员和教务主管可确认低风险动作；顾问只能为自己负责学生确认家长沟通、顾问跟进、续费建议和跟进标记；老师不能确认续费/家长沟通动作；财务不能确认沟通类 AI action。所有接口按 `req.user.organizationId` 隔离。
+
 #### POST /api/ai/generate-parent-message
 
 生成家长沟通话术。读取学生档案、课时、最近反馈、请假补课和报告状态。

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Sparkles, Send, Bot, User, MessageSquare, Clock, BookOpen, Settings, Plus, Calendar as CalendarIcon, FileText, AlertCircle, Users } from 'lucide-react';
 import { aiService } from '../services/aiService';
-import type { AICard, AICardAction, AIGenerationResult, AIQueryResult, ParentMessageScenario } from '../types';
+import type { AICard, AICardAction, AIGenerationResult, AIProposedAction, AIQueryResult, ParentMessageScenario } from '../types';
 
 const aiChatHistory = aiService.getHistorySync();
 
@@ -42,11 +42,38 @@ function priorityClass(priority?: AICard['priority']) {
   return 'bg-blue-50 text-blue-700';
 }
 
+function actionRiskClass(risk?: AIProposedAction['riskLevel']) {
+  if (risk === 'high') return 'bg-red-100 text-red-700 border-red-200';
+  if (risk === 'medium') return 'bg-orange-100 text-orange-700 border-orange-200';
+  return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+}
+
+function actionStatusLabel(status?: AIProposedAction['status']) {
+  if (status === 'executed') return '已执行';
+  if (status === 'cancelled') return '已取消';
+  if (status === 'expired') return '已过期';
+  if (status === 'failed') return '执行失败';
+  return '待确认';
+}
+
+function actionTypeLabel(type: AIProposedAction['actionType']) {
+  const labels: Record<AIProposedAction['actionType'], string> = {
+    CREATE_PARENT_MESSAGE: '家长沟通话术',
+    CREATE_ADVISOR_FOLLOW_UP: '顾问跟进任务',
+    GENERATE_RENEWAL_SUGGESTION: '续费建议',
+    POLISH_PARENT_REPORT: '报告润色草稿',
+    MARK_STUDENT_FOLLOW_UP_NEEDED: '标记顾问跟进',
+    CREATE_LEAVE_MAKEUP_NOTE: '补课处理备注',
+  };
+  return labels[type] ?? type;
+}
+
 export function AIAssistant() {
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string | ReactNode }[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  const [actionOverrides, setActionOverrides] = useState<Record<string, AIProposedAction>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -222,12 +249,115 @@ export function AIAssistant() {
     toast.success(action.message ?? `${action.label}已生成`);
   };
 
+  const updateActionInMessages = (actionId: string, nextAction: AIProposedAction) => {
+    setActionOverrides(prev => ({ ...prev, [actionId]: nextAction }));
+  };
+
+  const handleConfirmProposedAction = async (action: AIProposedAction) => {
+    if (action.status !== 'proposed') return;
+    const confirmed = window.confirm(`确认执行：${action.title}？\n\n系统会由后端再次校验权限和数据归属。`);
+    if (!confirmed) return;
+    setIsTyping(true);
+    try {
+      const result = await aiService.confirmAction(action);
+      toast.success(result.message || 'AI 动作已执行');
+      updateActionInMessages(action.id, result.executedAction);
+      appendAiText(`执行结果：${result.message || 'AI 动作已执行'}。`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI 动作执行失败';
+      toast.error(message);
+      appendAiText(`AI 动作执行失败：${message}`);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleCancelProposedAction = async (action: AIProposedAction) => {
+    if (action.status !== 'proposed') return;
+    setIsTyping(true);
+    try {
+      const result = await aiService.cancelAction(action.id);
+      toast.success(result.message || 'AI 动作已取消');
+      updateActionInMessages(action.id, result.action);
+      appendAiText(`已取消动作：${action.title}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI 动作取消失败';
+      toast.error(message);
+      appendAiText(`AI 动作取消失败：${message}`);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const ProposedActionCard = ({ action }: { action: AIProposedAction }) => {
+    const current = actionOverrides[action.id] ?? action;
+    const disabled = current.status !== 'proposed';
+    return (
+            <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm">
+              <div className="flex justify-between items-start gap-3 mb-3">
+                <div>
+                  <div className="text-xs text-purple-600 font-semibold mb-1">{actionTypeLabel(current.actionType)}</div>
+                  <div className="font-bold text-gray-900">{safeText(current.title, '待确认动作')}</div>
+                  <div className="text-sm text-gray-500 mt-1">{safeText(current.description)}</div>
+                </div>
+                <span className={`shrink-0 px-2 py-0.5 text-xs rounded-full border ${actionRiskClass(current.riskLevel)}`}>
+                  {current.riskLevel === 'medium' ? '中风险' : current.riskLevel === 'high' ? '高风险' : '低风险'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-600 mb-3">
+                <div>状态：<span className="font-medium text-gray-800">{actionStatusLabel(current.status)}</span></div>
+                <div>置信度：<span className="font-medium text-gray-800">{Math.round((current.confidence ?? 0) * 100)}%</span></div>
+                <div>过期时间：<span className="font-medium text-gray-800">{new Date(current.expiresAt).toLocaleString()}</span></div>
+              </div>
+              {current.errorMessage && <div className="text-xs text-red-600 mb-3">{current.errorMessage}</div>}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => toast.success('该动作将在后端按当前机构和权限校验后执行')}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50"
+                >
+                  查看详情
+                </button>
+                <button
+                  onClick={() => handleConfirmProposedAction(current)}
+                  disabled={disabled || isTyping}
+                  className="px-3 py-1.5 text-xs font-medium text-white bg-purple-600 border border-purple-600 rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {current.status === 'executed' ? '已执行' : '确认执行'}
+                </button>
+                <button
+                  onClick={() => handleCancelProposedAction(current)}
+                  disabled={disabled || isTyping}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+    );
+  };
+
+  const renderProposedActions = (actions: AIProposedAction[]) => {
+    if (actions.length === 0) return null;
+    return (
+      <div className="grid gap-3">
+        {actions.map((action) => <ProposedActionCard key={action.id} action={action} />)}
+      </div>
+    );
+  };
+
   const renderResult = (result: Partial<AIQueryResult> | null | undefined) => {
     const cards = asArray(result?.cards);
     const actions = asArray(result?.actions);
+    const proposedActions = asArray(result?.proposedActions);
+    const warnings = asArray(result?.warnings);
     return (
       <div className="space-y-4">
       <p>{safeText(result?.answer, 'AI 助手暂时没有返回可展示的数据，请换一个问题再试。')}</p>
+      {warnings.length > 0 && (
+        <div className="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg p-3">
+          {warnings.map((warning) => <div key={warning}>{warning}</div>)}
+        </div>
+      )}
       {cards.length > 0 && (
         <div className="grid gap-3">
           {cards.map((card, index) => {
@@ -271,6 +401,7 @@ export function AIAssistant() {
           })}
         </div>
       )}
+      {renderProposedActions(proposedActions)}
       {actions.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {actions.map((action) => (
@@ -297,7 +428,7 @@ export function AIAssistant() {
     setIsTyping(true);
 
     try {
-      const result = await aiService.queryAssistant(userMsg);
+      const result = await aiService.queryAgent(userMsg);
       const aiContent = renderResult(result);
       setMessages(prev => [...prev, { role: 'ai', content: aiContent }]);
     } catch (error) {

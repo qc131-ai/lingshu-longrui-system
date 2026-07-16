@@ -1,5 +1,14 @@
 # Release Checklist
 
+## 当前 Staging 环境
+
+- 前端：`https://lingshu-longrui-system.vercel.app`
+- 后端：`https://astralink-backend-staging.onrender.com`
+- Health：`https://astralink-backend-staging.onrender.com/api/health`
+- 数据库：Neon PostgreSQL
+
+这是 staging 测试环境。默认测试账号仅用于 staging / 演示，生产环境必须更换密码。Render 免费实例可能会休眠，首次访问较慢属于可接受现象。
+
 ## 工程检查
 
 - [ ] `npm run lint`
@@ -103,7 +112,10 @@
 
 - [ ] `.env.example` 中 staging 所需变量完整。
 - [ ] `VITE_API_BASE_URL` 指向正确后端 `/api`。
+- [ ] 当前 staging 前端 `VITE_API_BASE_URL=https://astralink-backend-staging.onrender.com/api`。
 - [ ] `CORS_ORIGIN` 只包含允许访问的前端域名。
+- [ ] 当前 staging 后端 `CORS_ORIGIN` / `FRONTEND_URL` 指向 `https://lingshu-longrui-system.vercel.app`。
+- [ ] Vercel 已配置 SPA rewrite，直接刷新 `/students`、`/courses`、`/schedules` 等子路由不返回 404。
 - [ ] `NODE_ENV` / `APP_ENV` 与部署环境一致。
 - [ ] PostgreSQL 连接使用托管 staging / production 数据库。
 - [ ] Prisma generate / push 或 migrate 已执行。

@@ -44,7 +44,40 @@ export type AIQueryResult = {
   intent: AIQueryIntent;
   cards: AICard[];
   actions: AICardAction[];
+  proposedActions?: AIProposedAction[];
+  warnings?: string[];
+  confidence?: number;
   relatedData?: Record<string, unknown>;
+};
+
+export type AIProposedAction = {
+  id: string;
+  actionType:
+    | "CREATE_PARENT_MESSAGE"
+    | "CREATE_ADVISOR_FOLLOW_UP"
+    | "GENERATE_RENEWAL_SUGGESTION"
+    | "POLISH_PARENT_REPORT"
+    | "MARK_STUDENT_FOLLOW_UP_NEEDED"
+    | "CREATE_LEAVE_MAKEUP_NOTE";
+  title: string;
+  description: string;
+  payload?: Record<string, unknown>;
+  status: "proposed" | "executed" | "cancelled" | "expired" | "failed";
+  riskLevel: "low" | "medium" | "high";
+  confidence: number;
+  expiresAt: string;
+  executedAt?: string | null;
+  cancelledAt?: string | null;
+  executionResult?: Record<string, unknown> | null;
+  errorMessage?: string | null;
+  requiresConfirmation: boolean;
+};
+
+export type AIActionExecutionResult = {
+  success: boolean;
+  executedAction: AIProposedAction;
+  message: string;
+  result?: Record<string, unknown>;
 };
 
 export type RenewalSuggestion = {

@@ -251,6 +251,20 @@
 - 「保存到学生档案」「应用到家长报告」「标记为已跟进」本阶段保留接口设计，先用 toast 反馈。
 - API 失败时在聊天区显示错误消息，不触发整页白屏。
 
+## 12.2 DeepSeek AI Agent 与确认卡片
+
+| 项目 | 内容 |
+|------|------|
+| **页面名称** | AI 智能助理（`/ai`） |
+| **前端交互** | 用户输入自然语言 → 调用 `aiService.queryAgent()` → 展示回答、数据卡片和待确认动作卡片 |
+| **对应后端 API** | `POST /api/ai/agent`、`GET /api/ai/actions`、`POST /api/ai/actions/confirm`、`POST /api/ai/actions/:id/cancel` |
+| **确认卡片字段** | 标题、描述、影响对象、风险等级、置信度、过期时间、状态、查看详情、确认执行、取消 |
+| **执行规则** | 前端只提交 `actionId` 和 `actionType`，不直接执行业务逻辑；后端从数据库读取 action 并二次校验 |
+| **数据来源** | 后端先按 `req.user.organizationId` 查询真实数据并脱敏，再传给 DeepSeek |
+| **fallback** | 无 `DEEPSEEK_API_KEY` 或 DeepSeek 调用失败时 fallback 到规则型 mock AI |
+| **安全限制** | 禁止 AI 直接删除数据、扣课时、发送报告、重置密码、创建用户、修改系统设置或导出数据 |
+| **是否第一阶段 MVP 必做** | **是**（Sprint 5-3：DeepSeek 真实 AI API 与低风险确认动作） |
+
 ---
 
 ## 13. 生成 AI 反馈总结

@@ -1,6 +1,8 @@
 import type {
   AIChatHistoryItem,
+  AIActionExecutionResult,
   AIQueryResult,
+  AIProposedAction,
   ParentMessageResult,
   ParentMessageScenario,
   PolishReportResult,
@@ -64,6 +66,18 @@ function normalizeAiResult(payload: unknown): AIQueryResult {
     actions: Array.isArray((card as AICard).actions) ? (card as AICard).actions : [],
   }));
   const actions = Array.isArray(raw.actions) ? raw.actions : [];
+  const proposedActions = Array.isArray(raw.proposedActions) ? raw.proposedActions.filter((action): action is AIProposedAction => Boolean(action && typeof action === "object")).map((action) => ({
+    ...(action as AIProposedAction),
+    id: String((action as AIProposedAction).id ?? crypto.randomUUID()),
+    title: String((action as AIProposedAction).title ?? "待确认动作"),
+    description: String((action as AIProposedAction).description ?? ""),
+    status: (action as AIProposedAction).status ?? "proposed",
+    riskLevel: (action as AIProposedAction).riskLevel ?? "low",
+    confidence: Number((action as AIProposedAction).confidence ?? 0),
+    expiresAt: String((action as AIProposedAction).expiresAt ?? new Date().toISOString()),
+    requiresConfirmation: Boolean((action as AIProposedAction).requiresConfirmation ?? true),
+  })) : [];
+  const warnings = Array.isArray(raw.warnings) ? raw.warnings.filter((item): item is string => typeof item === "string") : [];
 
   if (cards.length > 0 || typeof raw.answer === "string") {
     return {
@@ -71,6 +85,9 @@ function normalizeAiResult(payload: unknown): AIQueryResult {
       intent,
       cards,
       actions,
+      proposedActions,
+      warnings,
+      confidence: typeof raw.confidence === "number" ? raw.confidence : undefined,
       relatedData: raw.relatedData && typeof raw.relatedData === "object" ? (raw.relatedData as Record<string, unknown>) : undefined,
     };
   }
@@ -136,6 +153,40 @@ export const aiService = {
       setApiError(aiApiState.query, messageText);
       throw error;
     }
+  },
+
+  async queryAgent(message: string, context?: Record<string, unknown>): Promise<AIQueryResult> {
+    setApiLoading(aiApiState.query);
+    try {
+      const result = await apiClient.request<unknown>("/ai/agent", {
+        method: "POST",
+        body: JSON.stringify({ message, context }),
+      });
+      const normalized = normalizeAiResult(result);
+      setApiSuccess(aiApiState.query, normalized);
+      return normalized;
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "AI Agent 请求失败";
+      setApiError(aiApiState.query, messageText);
+      throw error;
+    }
+  },
+
+  async confirmAction(action: AIProposedAction): Promise<AIActionExecutionResult> {
+    return apiClient.request<AIActionExecutionResult>("/ai/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({
+        actionId: action.id,
+        actionType: action.actionType,
+        payload: action.payload ?? {},
+      }),
+    });
+  },
+
+  async cancelAction(actionId: string): Promise<{ action: AIProposedAction; message: string }> {
+    return apiClient.request<{ action: AIProposedAction; message: string }>(`/ai/actions/${actionId}/cancel`, {
+      method: "POST",
+    });
   },
 
   /** 生成续费建议 */
