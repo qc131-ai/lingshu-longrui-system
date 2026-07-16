@@ -2,6 +2,9 @@ import type {
   AIChatHistoryItem,
   AIQueryResult,
   AIProposedAction,
+  AITask,
+  AITaskStatus,
+  AITaskType,
   ParentMessageResult,
   ParentMessageScenario,
   PolishReportResult,
@@ -24,6 +27,16 @@ export const aiApiState = {
 type AIActionMutationResult = {
   action: AIProposedAction;
   executionResult?: Record<string, unknown>;
+  message?: string;
+};
+
+type AITaskListResult = {
+  tasks: AITask[];
+  total: number;
+};
+
+type AITaskStatusResult = {
+  task: AITask;
   message?: string;
 };
 
@@ -189,6 +202,26 @@ export const aiService = {
     return apiClient.request<AIActionMutationResult>(`/ai/agent/actions/${actionId}/cancel`, {
       method: "POST",
       body: JSON.stringify({ reason }),
+    });
+  },
+
+  async listTasks(filters: { status?: AITaskStatus | ""; taskType?: AITaskType | ""; studentId?: string } = {}): Promise<AITaskListResult> {
+    const params = new URLSearchParams();
+    if (filters.status) params.set("status", filters.status);
+    if (filters.taskType) params.set("taskType", filters.taskType);
+    if (filters.studentId) params.set("studentId", filters.studentId);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return apiClient.request<AITaskListResult>(`/ai/tasks${suffix}`);
+  },
+
+  async getTask(id: string): Promise<AITask> {
+    return apiClient.request<AITask>(`/ai/tasks/${id}`);
+  },
+
+  async updateTaskStatus(id: string, status: Extract<AITaskStatus, "pending" | "completed" | "failed">): Promise<AITaskStatusResult> {
+    return apiClient.request<AITaskStatusResult>(`/ai/tasks/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
     });
   },
 

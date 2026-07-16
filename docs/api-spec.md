@@ -1111,3 +1111,34 @@ DeepSeek 仍只负责生成建议。后端会把允许范围内的 `proposedActi
 | `CREATE_LEAVE_MAKEUP_NOTE` | 保存请假补课处理备注到 `ai_tasks` | 不审批、不排课 |
 
 仍然禁止：删除、扣课时、确认消课、发送报告/消息、修改用户权限、重置密码、导出数据、修改机构设置。所有执行前都会重新从 `ai_actions` 读取 payload，并校验 `organizationId` 和资源归属。
+
+### Sprint 5-3D AI 任务中心 API
+
+5-3D 将 5-3C 生成的 `ai_tasks` 做成可查看、筛选和标记状态的任务中心。任务中心不触发新的 AI 执行，也不发送消息。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/ai/tasks` | 查询 AI 任务/草稿列表 |
+| GET | `/api/ai/tasks/:id` | 查看 AI 任务详情 |
+| PATCH | `/api/ai/tasks/:id/status` | 标记任务状态 |
+
+查询参数：
+
+- `status`：`pending`、`processing`、`completed`、`failed`
+- `taskType`：`lesson_feedback`、`parent_report_summary`、`renewal_suggestion`、`learning_summary`、`chat`
+- `studentId`
+
+状态更新请求：
+
+```json
+{
+  "status": "completed"
+}
+```
+
+权限：
+
+- 管理员、教务主管可查看和标记机构内任务。
+- 顾问可查看/标记自己生成或自己负责学生相关任务。
+- 老师、财务只允许查看自己生成的任务，不能修改状态。
+- 所有查询按 `req.user.organizationId` 隔离。

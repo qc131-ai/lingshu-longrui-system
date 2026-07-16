@@ -24,6 +24,7 @@ import { Competitions } from './pages/Competitions';
 import { Reports } from './pages/Reports';
 import { Orders } from './pages/Orders';
 import { AIAssistant } from './pages/AIAssistant';
+import { AITasks } from './pages/AITasks';
 import { DataImport } from './pages/DataImport';
 import { SystemSettings } from './pages/SystemSettings';
 import { useAuth } from './context/AuthContext';
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="orders" element={<GuardedPage roles={['admin', 'advisor', 'finance']}><Orders /></GuardedPage>} />
         <Route path="finance" element={<GuardedPage roles={['admin', 'finance']}><Finance /></GuardedPage>} />
         <Route path="ai" element={<GuardedPage roles={['admin', 'academic_manager', 'advisor', 'teacher', 'finance']}><AIAssistant /></GuardedPage>} />
+        <Route path="ai-tasks" element={<GuardedPage roles={['admin', 'academic_manager', 'advisor']}><AITasks /></GuardedPage>} />
         <Route path="data-import" element={<GuardedPage roles={['admin', 'academic_manager', 'advisor', 'teacher', 'finance']}><DataImport /></GuardedPage>} />
         <Route path="settings" element={<GuardedPage roles={['admin', 'academic_manager']}><SystemSettings /></GuardedPage>} />
       </Route>

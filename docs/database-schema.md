@@ -836,3 +836,13 @@ Sprint 5-3B 新增 `ai_actions`，用于持久化 DeepSeek AI Agent 返回的待
 `ai_tasks.input_payload` 保存原始 action payload 和用户问题；`ai_tasks.output_payload` 保存生成内容、说明、关联学生名称和确认备注。`ai_actions.execution_result.taskId` 指向创建的 `ai_tasks.id`。
 
 执行边界：不会写入课时账户、课时流水、家长报告发送状态、用户权限、系统设置，也不会删除任何业务数据。
+
+### 12.2 Sprint 5-3D AI 任务中心
+
+5-3D 不新增数据库结构，继续复用 `ai_tasks`：
+
+- `input_payload`：保存来源 action、用户问题和原始 payload。
+- `output_payload`：保存草稿内容、说明、关联学生名称和确认备注。
+- `status`：任务中心展示和筛选使用 `pending`、`processing`、`completed`、`failed`。
+
+任务中心的“标记完成 / 不采用”只更新 `ai_tasks.status` 和必要的 `error_message`，不会修改业务主链表。后续如需要真正归档，可再新增 `archived` 状态或归档时间字段。

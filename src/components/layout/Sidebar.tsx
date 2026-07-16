@@ -16,6 +16,7 @@ import {
   FileText,
   Bot,
   FileSpreadsheet,
+  ClipboardList,
   Settings
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
@@ -39,6 +40,7 @@ const navigation: Array<{ name: string; href: string; icon: typeof LayoutDashboa
   { name: '财务概览', href: '/finance', icon: Wallet, roles: ['admin', 'finance'] },
   { name: '数据导入', href: '/data-import', icon: FileSpreadsheet, roles: ['admin', 'academic_manager', 'advisor', 'teacher', 'finance'] },
   { name: 'AI 教务助手', href: '/ai', icon: Bot, roles: ['admin', 'academic_manager', 'advisor', 'teacher', 'finance'] },
+  { name: 'AI 任务中心', href: '/ai-tasks', icon: ClipboardList, roles: ['admin', 'academic_manager', 'advisor'] },
   { name: '系统设置', href: '/settings', icon: Settings, roles: ['admin', 'academic_manager'] },
 ];
 

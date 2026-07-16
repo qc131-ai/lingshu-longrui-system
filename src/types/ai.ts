@@ -74,6 +74,32 @@ export type AIProposedAction = {
   requiresConfirmation: boolean;
 };
 
+export type AITaskStatus = "pending" | "processing" | "completed" | "failed";
+
+export type AITaskType =
+  | "lesson_feedback"
+  | "parent_report_summary"
+  | "renewal_suggestion"
+  | "learning_summary"
+  | "chat";
+
+export type AITask = {
+  id: string;
+  taskType: AITaskType;
+  status: AITaskStatus;
+  title: string;
+  content: string;
+  note?: string;
+  studentName?: string;
+  userName?: string;
+  inputPayload?: Record<string, unknown>;
+  outputPayload?: Record<string, unknown>;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+};
+
 export type RenewalSuggestion = {
   name?: string;
   course?: string;

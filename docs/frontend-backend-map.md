@@ -381,3 +381,16 @@
 - 家长报告润色：保存为 `AiTaskType.PARENT_REPORT_SUMMARY`。
 
 前端继续使用同一张确认卡片展示 `executionResult.content` 和 `executionResult.note`。`executionResult.taskId` 作为后续打开 AI 任务详情或草稿中心的预留字段。5-3C 仍不自动发送、不扣课时、不覆盖报告、不审批补课。
+
+## 18. AI 任务中心 / 草稿中心
+
+| 项目 | 内容 |
+|------|------|
+| **页面名称** | AI 任务中心（`/ai-tasks`） |
+| **前端交互** | 查看 AI 任务列表 → 按状态/类型筛选 → 搜索内容 → 查看详情 → 复制草稿 → 标记完成/不采用 |
+| **Service** | `aiService.listTasks`、`aiService.getTask`、`aiService.updateTaskStatus` |
+| **后端 API** | `GET /api/ai/tasks`、`GET /api/ai/tasks/:id`、`PATCH /api/ai/tasks/:id/status` |
+| **数据来源** | `ai_tasks` |
+| **导航权限** | 管理员、教务主管、顾问 |
+
+任务中心只管理 AI 生成内容的工作流状态，不发送消息、不扣课时、不审批补课、不修改家长报告正文。老师和财务可通过后端读取自己生成的任务，但前端默认不展示任务中心入口。

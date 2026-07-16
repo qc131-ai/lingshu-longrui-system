@@ -474,6 +474,16 @@ export const cancelAiActionSchema = z.object({
   reason: z.string().max(500).optional(),
 });
 
+export const aiTaskQuerySchema = z.object({
+  status: z.enum(["pending", "processing", "completed", "failed"]).optional(),
+  taskType: z.enum(["lesson_feedback", "parent_report_summary", "renewal_suggestion", "learning_summary", "chat"]).optional(),
+  studentId: z.string().min(1).optional(),
+});
+
+export const updateAiTaskStatusSchema = z.object({
+  status: z.enum(["pending", "completed", "failed"]),
+});
+
 export const uploadFileSchema = z.object({
   category: z.enum(["student_material", "homework_attachment", "competition_certificate", "contract", "report_file"]),
   studentId: z.string().min(1).optional(),

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import { AiActionStatus, AiMessageRole, AiQueryIntent, AiTaskStatus, AiTaskType, Prisma, type AiAction } from "@prisma/client";
+import { AiActionStatus, AiMessageRole, AiQueryIntent, AiTaskStatus, AiTaskType, Prisma, type AiAction, type AiTask } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { ok } from "../lib/response.js";
@@ -10,6 +10,7 @@ import { logOperation } from "../lib/operationLog.js";
 import { validate } from "../middleware/validate.js";
 import {
   aiAssistantSchema,
+  aiTaskQuerySchema,
   cancelAiActionSchema,
   confirmAiActionSchema,
   generateParentMessageSchema,
@@ -17,6 +18,7 @@ import {
   idParamSchema,
   polishReportSchema,
   studentRiskSummarySchema,
+  updateAiTaskStatusSchema,
 } from "../validators/schemas.js";
 import type { MockUser } from "../middleware/auth.js";
 import { AppError, notFound } from "../lib/errors.js";
@@ -192,6 +194,95 @@ function toClientAiAction(action: AiAction) {
     errorMessage: action.errorMessage,
     requiresConfirmation: action.requiresConfirmation,
   };
+}
+
+function aiTaskStatus(status: AiTaskStatus) {
+  return status.toLowerCase() as "pending" | "processing" | "completed" | "failed";
+}
+
+function aiTaskType(type: AiTaskType) {
+  const map: Record<AiTaskType, string> = {
+    LESSON_FEEDBACK: "lesson_feedback",
+    PARENT_REPORT_SUMMARY: "parent_report_summary",
+    RENEWAL_SUGGESTION: "renewal_suggestion",
+    LEARNING_SUMMARY: "learning_summary",
+    CHAT: "chat",
+  };
+  return map[type];
+}
+
+function storedAiTaskStatus(status: string) {
+  const map: Record<string, AiTaskStatus> = {
+    pending: AiTaskStatus.PENDING,
+    processing: AiTaskStatus.PROCESSING,
+    completed: AiTaskStatus.COMPLETED,
+    failed: AiTaskStatus.FAILED,
+  };
+  return map[status] ?? AiTaskStatus.COMPLETED;
+}
+
+function storedAiTaskType(type: string | undefined) {
+  if (!type) return undefined;
+  const map: Record<string, AiTaskType> = {
+    lesson_feedback: AiTaskType.LESSON_FEEDBACK,
+    parent_report_summary: AiTaskType.PARENT_REPORT_SUMMARY,
+    renewal_suggestion: AiTaskType.RENEWAL_SUGGESTION,
+    learning_summary: AiTaskType.LEARNING_SUMMARY,
+    chat: AiTaskType.CHAT,
+  };
+  return map[type];
+}
+
+type AiTaskWithRelations = AiTask & {
+  user?: { id: string; displayName: string; email: string } | null;
+  student?: { id: string; name: string } | null;
+  parentReport?: { id: string; studentName: string; periodLabel: string } | null;
+};
+
+function outputPayload(task: AiTask) {
+  return task.outputPayload && typeof task.outputPayload === "object" && !Array.isArray(task.outputPayload)
+    ? task.outputPayload as Record<string, unknown>
+    : {};
+}
+
+function inputPayload(task: AiTask) {
+  return task.inputPayload && typeof task.inputPayload === "object" && !Array.isArray(task.inputPayload)
+    ? task.inputPayload as Record<string, unknown>
+    : {};
+}
+
+function toClientAiTask(task: AiTaskWithRelations) {
+  const output = outputPayload(task);
+  const input = inputPayload(task);
+  return {
+    id: task.id,
+    taskType: aiTaskType(task.taskType),
+    status: aiTaskStatus(task.status),
+    title: typeof output.title === "string" ? output.title : typeof input.message === "string" ? input.message : "AI 任务",
+    content: typeof output.content === "string" ? output.content : "",
+    note: typeof output.note === "string" ? output.note : task.errorMessage ?? "",
+    studentName: task.student?.name ?? (typeof output.studentName === "string" ? output.studentName : task.parentReport?.studentName ?? "-"),
+    userName: task.user?.displayName ?? "-",
+    inputPayload: input,
+    outputPayload: output,
+    errorMessage: task.errorMessage,
+    startedAt: task.startedAt?.toISOString() ?? null,
+    completedAt: task.completedAt?.toISOString() ?? null,
+    createdAt: task.createdAt.toISOString(),
+  };
+}
+
+function aiTaskScope(user: MockUser): Prisma.AiTaskWhereInput {
+  if (user.role === "admin" || user.role === "academic_manager") return {};
+  if (user.role === "advisor") {
+    return {
+      OR: [
+        { userId: user.id },
+        { student: { advisorId: user.id } },
+      ],
+    };
+  }
+  return { userId: user.id };
 }
 
 function optionalUuid(value: unknown) {
@@ -1208,6 +1299,94 @@ aiRouter.post(
     });
 
     return ok(res, { action: toClientAiAction(updated), message: "AI 动作已取消" });
+  })
+);
+
+aiRouter.get(
+  "/tasks",
+  validate({ query: aiTaskQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { status, taskType, studentId } = req.query;
+    const tasks = await prisma.aiTask.findMany({
+      where: {
+        organizationId: req.user.organizationId,
+        ...aiTaskScope(req.user),
+        ...(typeof status === "string" ? { status: storedAiTaskStatus(status) } : {}),
+        ...(typeof taskType === "string" ? { taskType: storedAiTaskType(taskType) } : {}),
+        ...(typeof studentId === "string" ? { studentId } : {}),
+      },
+      include: {
+        user: { select: { id: true, displayName: true, email: true } },
+        student: { select: { id: true, name: true } },
+        parentReport: { select: { id: true, studentName: true, periodLabel: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    return ok(res, { tasks: tasks.map(toClientAiTask), total: tasks.length });
+  })
+);
+
+aiRouter.get(
+  "/tasks/:id",
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req, res) => {
+    const task = await prisma.aiTask.findFirst({
+      where: {
+        id: req.params.id,
+        organizationId: req.user.organizationId,
+        ...aiTaskScope(req.user),
+      },
+      include: {
+        user: { select: { id: true, displayName: true, email: true } },
+        student: { select: { id: true, name: true } },
+        parentReport: { select: { id: true, studentName: true, periodLabel: true } },
+      },
+    });
+    if (!task) throw notFound("AI task");
+
+    return ok(res, toClientAiTask(task));
+  })
+);
+
+aiRouter.patch(
+  "/tasks/:id/status",
+  validate({ params: idParamSchema, body: updateAiTaskStatusSchema }),
+  asyncHandler(async (req, res) => {
+    const task = await prisma.aiTask.findFirst({
+      where: {
+        id: req.params.id,
+        organizationId: req.user.organizationId,
+        ...aiTaskScope(req.user),
+      },
+    });
+    if (!task) throw notFound("AI task");
+    if (req.user.role === "teacher" || req.user.role === "finance") {
+      throw new AppError(403, "FORBIDDEN", "当前账号无权修改 AI 任务状态");
+    }
+
+    const status = storedAiTaskStatus(req.body.status);
+    const updated = await prisma.aiTask.update({
+      where: { id: task.id },
+      data: {
+        status,
+        completedAt: status === AiTaskStatus.COMPLETED ? new Date() : task.completedAt,
+        errorMessage: status === AiTaskStatus.FAILED ? "用户标记为失败/不采用" : null,
+      },
+      include: {
+        user: { select: { id: true, displayName: true, email: true } },
+        student: { select: { id: true, name: true } },
+        parentReport: { select: { id: true, studentName: true, periodLabel: true } },
+      },
+    });
+
+    await logAiOperation(req, "ai_task_status_updated", {
+      taskId: updated.id,
+      status: req.body.status,
+    });
+
+    return ok(res, { task: toClientAiTask(updated), message: "AI 任务状态已更新" });
   })
 );
 
