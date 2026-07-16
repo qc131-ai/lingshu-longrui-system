@@ -125,7 +125,11 @@
 - 数据导入导出：模板字段是否覆盖历史数据迁移。
 - 权限设置：管理员、教务、顾问、老师、财务权限是否合理。
 
-可使用：`docs/client-feedback-form.md`。
+可使用：
+
+- `docs/client-feedback-form.md`：客户填写的模块化反馈表。
+- `docs/trial-issue-log-template.md`：项目组内部登记、分级、复现和验收问题。
+- `docs/sprint-5-6-trial-support-playbook.md`：客户试用期间的问题处理规则和 Go / No-Go 标准。
 
 ## 9. 联系方式
 

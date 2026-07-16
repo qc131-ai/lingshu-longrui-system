@@ -132,3 +132,12 @@
 - [ ] Prisma generate / push 或 migrate 已执行。
 - [ ] staging 已执行 seed，production 未执行 demo seed。
 - [ ] `docs/demo-script.md`、`docs/trial-guide.md`、`docs/ai-agent-demo-guide.md`、`docs/trial-feedback-form.md` 已准备好。
+
+## 客户试用支持检查
+
+- [ ] 已准备 `docs/sprint-5-6-trial-support-playbook.md`。
+- [ ] 已准备 `docs/trial-issue-log-template.md`。
+- [ ] 已明确 P0 / P1 / P2 / P3 分级规则。
+- [ ] 已明确客户反馈登记、复现、修复、复测流程。
+- [ ] 已明确试用 Go / No-Go 标准。
+- [ ] 已明确试用期间不扩展大功能、不重做 UI、不让 AI 自动执行高风险动作。
