@@ -63,6 +63,9 @@
 - [ ] 生成、编辑、发送家长报告。
 - [ ] AI 助手真实数据查询。
 - [ ] AI 续费建议、家长话术、报告润色、风险总结。
+- [ ] DeepSeek AI Agent 可生成确认动作卡片。
+- [ ] 确认 AI 动作后生成 `ai_tasks` 草稿记录。
+- [ ] AI 任务中心可查看、复制、筛选、标记状态。
 - [ ] Excel 数据导入导出。
 - [ ] 系统设置保存后刷新仍保留。
 - [ ] 新增用户、停用用户、重置密码。
@@ -79,6 +82,13 @@
 - [ ] 可生成家长沟通话术。
 - [ ] 可润色家长报告。
 - [ ] 可生成学生风险总结。
+- [ ] AI Agent 查询低课时学生后可生成 `CREATE_PARENT_MESSAGE` / `CREATE_ADVISOR_FOLLOW_UP`。
+- [ ] AI Agent 动作必须人工点击确认后才执行。
+- [ ] AI Agent 重复确认返回 `409`。
+- [ ] AI Agent 老师账号确认动作返回 `403` 或不泄露资源存在。
+- [ ] AI 任务中心 `/ai-tasks` 管理员、教务主管、顾问可见。
+- [ ] AI 任务中心老师、财务无导航入口。
+- [ ] AI 任务中心状态筛选和复制内容可用。
 
 ## 导入导出检查
 
@@ -106,6 +116,7 @@
 - [ ] `internalNotes` 不外泄。
 - [ ] 家长报告不包含内部字段。
 - [ ] AI 生成内容不包含 `operation_logs`、密码、token 或跨机构数据。
+- [ ] AI 不允许删除数据、扣课时、发送报告、重置密码、修改权限、导出数据。
 - [ ] 生产环境不使用测试密码。
 
 ## 部署检查
@@ -120,4 +131,4 @@
 - [ ] PostgreSQL 连接使用托管 staging / production 数据库。
 - [ ] Prisma generate / push 或 migrate 已执行。
 - [ ] staging 已执行 seed，production 未执行 demo seed。
-- [ ] `docs/demo-script.md`、`docs/trial-guide.md`、`docs/trial-feedback-form.md` 已准备好。
+- [ ] `docs/demo-script.md`、`docs/trial-guide.md`、`docs/ai-agent-demo-guide.md`、`docs/trial-feedback-form.md` 已准备好。

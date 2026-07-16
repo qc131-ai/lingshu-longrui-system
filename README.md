@@ -323,9 +323,11 @@ npm run build
 ### 客户试用资料
 
 - 演示脚本：`docs/demo-script.md`
+- AI Agent 演示手册：`docs/ai-agent-demo-guide.md`
 - 试用说明：`docs/trial-guide.md`
 - 反馈表：`docs/trial-feedback-form.md`
 - 部署文档：`docs/deployment.md`
+- Staging 冒烟测试：`docs/staging-smoke-test.md`
 - 上线前检查清单：`docs/release-checklist.md`
 
 ### 核心演示流程
@@ -336,8 +338,9 @@ npm run build
 4. 进入「上课记录」，打开记录详情，生成 AI 反馈并确认消课。
 5. 进入「订单课时」，查看课时流水和低课时预警。
 6. 进入「家长报告」，生成 AI 摘要并模拟发送给家长。
-7. 进入「AI 教务助手」，提问「哪些学生课时低于 5 小时？」。
-8. 切换顾问、老师、财务账号，展示不同角色菜单和权限差异。
+7. 进入「AI 教务助手」，提问「哪些学生课时低于 5 小时？请生成家长提醒话术和顾问跟进」。
+8. 确认一条 AI 动作后进入「AI 任务中心」，展示草稿、复制和状态标记。
+9. 切换顾问、老师、财务账号，展示不同角色菜单和权限差异。
 
 ### 常见问题排查
 
