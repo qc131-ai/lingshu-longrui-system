@@ -780,3 +780,40 @@ V1 不新增表，复用 `import_logs` 作为 `ImportBatch`：
 | `previewRows/errors` | `result` JSON | 每行原始数据、标准化数据、错误和 warning |
 
 确认导入后，`result.createdIds` 保存本批次写入的实体 ID，回滚时只处理这些 ID，不影响非该批次创建的数据。课时余额导入会 upsert `credit_accounts`，并生成一条 `credit_transactions`，`adjust_type = manual`，`notes` 标记为 `Excel 导入期初课时余额`；导出时展示为 `opening_balance`。
+
+## 12. Sprint 5-3B AI 确认动作模型
+
+Sprint 5-3B 新增 `ai_actions`，用于持久化 DeepSeek AI Agent 返回的待确认动作。AI 不能直接修改业务表；用户确认后也只生成安全结果并更新 `ai_actions`，后续阶段再扩展真正业务执行器。
+
+| 字段 | 说明 |
+|------|------|
+| `id` | AI 动作 ID |
+| `organization_id` | 机构隔离，来自当前登录用户 |
+| `user_id` | 生成动作的用户 |
+| `session_id` | AI 会话 ID，可空 |
+| `message` | 用户原始提问 |
+| `intent` | AI 判断的意图 |
+| `action_type` | 白名单动作类型 |
+| `title` / `description` | 前端确认卡片展示文案 |
+| `payload` | AI 生成的结构化草稿数据 |
+| `status` | `proposed`、`executed`、`cancelled`、`expired`、`failed` |
+| `risk_level` | `low`、`medium`、`high` |
+| `confidence` | AI 置信度 |
+| `requires_confirmation` | 必须为 true |
+| `execution_result` | 用户确认后生成的安全结果 |
+| `error_message` | 失败或取消原因 |
+| `expires_at` | 动作过期时间 |
+| `executed_at` / `cancelled_at` | 执行或取消时间 |
+
+索引：
+
+- `(organization_id, user_id, created_at)`：查询当前机构和用户动作。
+- `(organization_id, status)`：查询待确认动作。
+- `(expires_at)`：后续清理过期动作。
+
+权限规则：
+
+- 管理员、教务主管可查看/确认机构内动作。
+- 顾问只能查看/确认自己生成的动作。
+- 老师、财务默认不能确认动作。
+- 所有读取和更新必须按 `organization_id` 过滤。

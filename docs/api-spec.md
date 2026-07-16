@@ -1049,3 +1049,48 @@ pages → services.*() → data/（Mock）或 fetch API（生产）
 - AI 设置：`aiMode`、`enableAiAssistant`、`enableAiRenewalSuggestion`、`enableAiReportPolish`。
 
 权限：管理员可查看和修改系统设置、管理用户；教务主管可查看系统设置、用户列表和权限矩阵；顾问、老师、财务访问系统设置 API 返回 `403`。停用用户不能登录，后续接口会校验用户状态。
+
+## Sprint 5-3B AI Agent 确认动作 API
+
+DeepSeek 仍只负责生成建议。后端会把允许范围内的 `proposedActions` 保存为 `ai_actions`，前端必须使用后端返回的 `id` 执行确认或取消，不允许把前端 payload 当作执行依据。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/ai/agent` | 查询真实数据并生成回答、结果卡片和已持久化的确认动作 |
+| GET | `/api/ai/agent/actions` | 查询当前机构 AI 动作，管理员/教务主管可看机构内动作，其他角色只看自己创建的动作 |
+| GET | `/api/ai/agent/actions/:id` | 查看单个 AI 动作 |
+| POST | `/api/ai/agent/actions/:id/confirm` | 确认执行 AI 动作 |
+| POST | `/api/ai/agent/actions/:id/cancel` | 取消 AI 动作 |
+
+`confirm` 请求：
+
+```json
+{
+  "confirmationNote": "可选确认备注"
+}
+```
+
+`cancel` 请求：
+
+```json
+{
+  "reason": "可选取消原因"
+}
+```
+
+确认动作状态：
+
+- `proposed`：待确认。
+- `executed`：已确认并生成安全结果。
+- `cancelled`：用户取消。
+- `expired`：超过有效期，需重新生成。
+- `failed`：执行失败。
+
+权限与安全规则：
+
+- 所有接口使用 `req.user.organizationId` 隔离，不接受前端传 `organizationId`。
+- 管理员、教务主管可以确认机构内 AI 动作；顾问只能确认自己生成的动作。
+- 老师和财务默认不能确认 AI 动作。
+- 5-3B 的确认执行只写入 `ai_actions.executionResult`，不会自动扣课时、发送报告、发送消息、修改用户权限或修改业务主链数据。
+- 删除、扣课时、重置密码、导出数据、发送家长报告等高风险请求仍会被拒绝。
+- 确认和取消都会写入 `operation_logs`，日志失败不影响主流程。

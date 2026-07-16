@@ -178,6 +178,14 @@ enum AiTaskStatus {
   FAILED     @map("failed")
 }
 
+enum AiActionStatus {
+  PROPOSED  @map("proposed")
+  EXECUTED  @map("executed")
+  CANCELLED @map("cancelled")
+  EXPIRED   @map("expired")
+  FAILED    @map("failed")
+}
+
 model Organization {
   id        String   @id @default(uuid()) @db.Uuid
   name      String   @db.VarChar(200)
@@ -203,6 +211,7 @@ model Organization {
   parentReports       ParentReport[]
   aiMessages          AiMessage[]
   aiTasks             AiTask[]
+  aiActions           AiAction[]
   operationLogs       OperationLog[]
   files               UploadedFile[]
   importLogs          ImportLog[]
@@ -264,6 +273,7 @@ model User {
   sentParentReports    ParentReport[]      @relation("ParentReportSender")
   aiMessages          AiMessage[]
   aiTasks             AiTask[]
+  aiActions           AiAction[]
   operationLogs       OperationLog[]
   uploadedFiles       UploadedFile[]
   orders              Order[]
@@ -849,6 +859,38 @@ model AiTask {
   @@index([status, taskType])
   @@index([studentId])
   @@map("ai_tasks")
+}
+
+model AiAction {
+  id               String         @id @default(uuid()) @db.Uuid
+  organizationId   String         @map("organization_id") @db.Uuid
+  userId           String         @map("user_id") @db.Uuid
+  sessionId        String?        @map("session_id") @db.Uuid
+  message          String?        @db.Text
+  intent           String?        @db.VarChar(80)
+  actionType       String         @map("action_type") @db.VarChar(80)
+  title            String         @db.VarChar(200)
+  description      String         @db.Text
+  payload          Json           @default("{}")
+  status           AiActionStatus @default(PROPOSED)
+  riskLevel        String         @default("low") @map("risk_level") @db.VarChar(20)
+  confidence       Decimal        @default(0) @db.Decimal(5, 4)
+  requiresConfirmation Boolean    @default(true) @map("requires_confirmation")
+  executionResult  Json?          @map("execution_result")
+  errorMessage     String?        @map("error_message") @db.Text
+  expiresAt        DateTime       @map("expires_at") @db.Timestamptz
+  executedAt       DateTime?      @map("executed_at") @db.Timestamptz
+  cancelledAt      DateTime?      @map("cancelled_at") @db.Timestamptz
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, userId, createdAt])
+  @@index([organizationId, status])
+  @@index([expiresAt])
+  @@map("ai_actions")
 }
 
 model OperationLog {

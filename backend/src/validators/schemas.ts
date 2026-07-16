@@ -466,6 +466,14 @@ export const studentRiskSummarySchema = z.object({
   periodEnd: dateStringSchema.optional(),
 });
 
+export const confirmAiActionSchema = z.object({
+  confirmationNote: z.string().max(500).optional(),
+});
+
+export const cancelAiActionSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
 export const uploadFileSchema = z.object({
   category: z.enum(["student_material", "homework_attachment", "competition_certificate", "contract", "report_file"]),
   studentId: z.string().min(1).optional(),

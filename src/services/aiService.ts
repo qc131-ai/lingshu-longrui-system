@@ -21,6 +21,12 @@ export const aiApiState = {
   riskSummary: createApiCallState<StudentRiskSummaryResult>(),
 };
 
+type AIActionMutationResult = {
+  action: AIProposedAction;
+  executionResult?: Record<string, unknown>;
+  message?: string;
+};
+
 type LegacyStudent = {
   id?: string;
   name?: string;
@@ -170,6 +176,20 @@ export const aiService = {
       setApiError(aiApiState.query, messageText);
       throw error;
     }
+  },
+
+  async confirmAgentAction(actionId: string, confirmationNote?: string): Promise<AIActionMutationResult> {
+    return apiClient.request<AIActionMutationResult>(`/ai/agent/actions/${actionId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ confirmationNote }),
+    });
+  },
+
+  async cancelAgentAction(actionId: string, reason?: string): Promise<AIActionMutationResult> {
+    return apiClient.request<AIActionMutationResult>(`/ai/agent/actions/${actionId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
   },
 
   /** 生成续费建议 */

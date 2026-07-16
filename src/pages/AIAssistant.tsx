@@ -249,42 +249,89 @@ export function AIAssistant() {
   };
 
   const ProposedActionCard = ({ action }: { action: AIProposedAction }) => {
+    const [currentAction, setCurrentAction] = useState(action);
+    const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+    const executionResult = currentAction.executionResult && typeof currentAction.executionResult === 'object'
+      ? currentAction.executionResult
+      : null;
+    const executionContent = executionResult && typeof executionResult.content === 'string' ? executionResult.content : '';
+    const executionNote = executionResult && typeof executionResult.note === 'string' ? executionResult.note : '';
+    const canConfirm = currentAction.status === 'proposed' && !isSubmittingAction;
+
+    const handleConfirmProposedAction = async () => {
+      setIsSubmittingAction(true);
+      try {
+        const result = await aiService.confirmAgentAction(currentAction.id);
+        setCurrentAction(result.action);
+        toast.success(result.message ?? 'AI 动作已确认');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'AI 动作确认失败';
+        toast.error(message);
+        setCurrentAction(prev => ({ ...prev, errorMessage: message, status: 'failed' }));
+      } finally {
+        setIsSubmittingAction(false);
+      }
+    };
+
+    const handleCancelProposedAction = async () => {
+      setIsSubmittingAction(true);
+      try {
+        const result = await aiService.cancelAgentAction(currentAction.id, '用户在 AI 助手中取消');
+        setCurrentAction(result.action);
+        toast.success(result.message ?? 'AI 动作已取消');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'AI 动作取消失败';
+        toast.error(message);
+        setCurrentAction(prev => ({ ...prev, errorMessage: message }));
+      } finally {
+        setIsSubmittingAction(false);
+      }
+    };
+
     return (
             <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm">
               <div className="flex justify-between items-start gap-3 mb-3">
                 <div>
-                  <div className="text-xs text-purple-600 font-semibold mb-1">{actionTypeLabel(action.actionType)}</div>
-                  <div className="font-bold text-gray-900">{safeText(action.title, '待确认动作')}</div>
-                  <div className="text-sm text-gray-500 mt-1">{safeText(action.description)}</div>
+                  <div className="text-xs text-purple-600 font-semibold mb-1">{actionTypeLabel(currentAction.actionType)}</div>
+                  <div className="font-bold text-gray-900">{safeText(currentAction.title, '待确认动作')}</div>
+                  <div className="text-sm text-gray-500 mt-1">{safeText(currentAction.description)}</div>
                 </div>
-                <span className={`shrink-0 px-2 py-0.5 text-xs rounded-full border ${actionRiskClass(action.riskLevel)}`}>
-                  {action.riskLevel === 'medium' ? '中风险' : action.riskLevel === 'high' ? '高风险' : '低风险'}
+                <span className={`shrink-0 px-2 py-0.5 text-xs rounded-full border ${actionRiskClass(currentAction.riskLevel)}`}>
+                  {currentAction.riskLevel === 'medium' ? '中风险' : currentAction.riskLevel === 'high' ? '高风险' : '低风险'}
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-600 mb-3">
-                <div>状态：<span className="font-medium text-gray-800">{actionStatusLabel(action.status)}</span></div>
-                <div>置信度：<span className="font-medium text-gray-800">{Math.round((action.confidence ?? 0) * 100)}%</span></div>
-                <div>执行方式：<span className="font-medium text-gray-800">下一阶段开放</span></div>
+                <div>状态：<span className="font-medium text-gray-800">{actionStatusLabel(currentAction.status)}</span></div>
+                <div>置信度：<span className="font-medium text-gray-800">{Math.round((currentAction.confidence ?? 0) * 100)}%</span></div>
+                <div>执行方式：<span className="font-medium text-gray-800">确认后生成安全结果</span></div>
               </div>
-              {action.errorMessage && <div className="text-xs text-red-600 mb-3">{action.errorMessage}</div>}
+              {currentAction.errorMessage && <div className="text-xs text-red-600 mb-3">{currentAction.errorMessage}</div>}
+              {(executionContent || executionNote) && (
+                <div className="text-xs text-purple-800 bg-purple-50 border border-purple-100 rounded-lg p-3 mb-3 space-y-1">
+                  {executionContent && <div>{executionContent}</div>}
+                  {executionNote && <div className="text-purple-600">{executionNote}</div>}
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => toast.success('本阶段只展示建议动作，下一阶段开放确认执行')}
+                  onClick={() => toast.success(executionContent || currentAction.description || 'AI 建议动作已加载')}
                   className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50"
                 >
                   查看详情
                 </button>
                 <button
-                  disabled
+                  onClick={handleConfirmProposedAction}
+                  disabled={!canConfirm}
                   className="px-3 py-1.5 text-xs font-medium text-white bg-purple-600 border border-purple-600 rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  下一阶段开放
+                  {isSubmittingAction ? '处理中...' : currentAction.status === 'executed' ? '已执行' : '确认执行'}
                 </button>
                 <button
-                  disabled
+                  onClick={handleCancelProposedAction}
+                  disabled={!canConfirm}
                   className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  取消
+                  {currentAction.status === 'cancelled' ? '已取消' : '取消'}
                 </button>
               </div>
             </div>

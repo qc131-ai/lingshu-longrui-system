@@ -357,3 +357,17 @@
 | **后端权限** | 管理员可管理设置和用户；教务主管可查看；顾问、老师、财务返回 `403` |
 
 前端不传 `organizationId`。新增和重置密码只提交明文一次，后端使用 hash 存储。停用用户再次登录会被拒绝，已登录请求也会检查用户状态。
+
+## 17. DeepSeek AI Agent 确认卡片
+
+| 项目 | 内容 |
+|------|------|
+| **页面名称** | AI 教务助手（`/ai`） |
+| **前端交互** | 输入问题 → 调用 AI Agent → 展示回答、结果卡片、确认动作卡片 → 点击确认执行或取消 |
+| **Service** | `aiService.queryAgent`、`aiService.confirmAgentAction`、`aiService.cancelAgentAction` |
+| **后端 API** | `POST /api/ai/agent`、`POST /api/ai/agent/actions/:id/confirm`、`POST /api/ai/agent/actions/:id/cancel`、`GET /api/ai/agent/actions` |
+| **持久化表** | `ai_actions` |
+| **执行边界** | 5-3B 只生成安全结果并更新 AI 动作状态，不直接修改学员、课时、报告发送、用户权限等业务数据 |
+| **权限** | 管理员/教务主管可确认机构内动作；顾问只能确认自己生成的动作；老师/财务不可确认 |
+
+前端收到 `proposedActions` 后直接展示后端返回的 `id/status/expiresAt/executionResult`。确认或取消时只提交 action id，后端重新读取 `ai_actions` 并按 `organizationId`、角色和状态校验，避免前端篡改 payload。

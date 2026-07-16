@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import { AiMessageRole, AiQueryIntent, Prisma } from "@prisma/client";
+import { AiActionStatus, AiMessageRole, AiQueryIntent, Prisma, type AiAction } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { ok } from "../lib/response.js";
@@ -10,8 +10,11 @@ import { logOperation } from "../lib/operationLog.js";
 import { validate } from "../middleware/validate.js";
 import {
   aiAssistantSchema,
+  cancelAiActionSchema,
+  confirmAiActionSchema,
   generateParentMessageSchema,
   generateRenewalSuggestionSchema,
+  idParamSchema,
   polishReportSchema,
   studentRiskSummarySchema,
 } from "../validators/schemas.js";
@@ -158,6 +161,89 @@ async function logAiOperation(req: Parameters<typeof logOperation>[0], action: s
 
 function requireAiRoles(user: MockUser, roles: MockUser["role"][], message = "当前账号无权使用该 AI 生成功能") {
   if (!roles.includes(user.role)) throw new AppError(403, "FORBIDDEN", message);
+}
+
+function canManageAiAction(user: MockUser, action: AiAction) {
+  if (user.role === "admin" || user.role === "academic_manager") return true;
+  return user.role === "advisor" && action.userId === user.id;
+}
+
+function aiActionStatus(status: AiActionStatus) {
+  return status.toLowerCase() as "proposed" | "executed" | "cancelled" | "expired" | "failed";
+}
+
+function toClientAiAction(action: AiAction) {
+  return {
+    id: action.id,
+    actionType: action.actionType,
+    title: action.title,
+    description: action.description,
+    payload: action.payload && typeof action.payload === "object" && !Array.isArray(action.payload)
+      ? action.payload as Record<string, unknown>
+      : {},
+    status: aiActionStatus(action.status),
+    riskLevel: action.riskLevel,
+    confidence: toNumber(action.confidence),
+    expiresAt: action.expiresAt.toISOString(),
+    executedAt: action.executedAt?.toISOString() ?? null,
+    cancelledAt: action.cancelledAt?.toISOString() ?? null,
+    executionResult: action.executionResult ?? null,
+    errorMessage: action.errorMessage,
+    requiresConfirmation: action.requiresConfirmation,
+  };
+}
+
+function buildAiActionExecutionResult(action: AiAction, confirmationNote?: string): Record<string, unknown> {
+  const payload = action.payload && typeof action.payload === "object" && !Array.isArray(action.payload)
+    ? action.payload as Record<string, unknown>
+    : {};
+  const generatedAt = new Date().toISOString();
+  const text = typeof payload.message === "string"
+    ? payload.message
+    : typeof payload.content === "string"
+      ? payload.content
+      : typeof payload.draft === "string"
+        ? payload.draft
+        : action.description;
+
+  const resultByType: Record<string, Record<string, unknown>> = {
+    CREATE_PARENT_MESSAGE: {
+      resultType: "parent_message_draft",
+      content: text,
+      note: "已生成家长沟通草稿，未自动发送给家长。",
+    },
+    CREATE_ADVISOR_FOLLOW_UP: {
+      resultType: "advisor_follow_up_note",
+      content: text,
+      note: "已生成顾问跟进建议，未自动创建外部通知。",
+    },
+    GENERATE_RENEWAL_SUGGESTION: {
+      resultType: "renewal_suggestion",
+      content: text,
+      note: "已生成续费建议草稿，未自动发送或修改订单。",
+    },
+    POLISH_PARENT_REPORT: {
+      resultType: "polished_report_draft",
+      content: text,
+      note: "已生成报告润色草稿，未自动覆盖原报告。",
+    },
+    MARK_STUDENT_FOLLOW_UP_NEEDED: {
+      resultType: "student_follow_up_marker",
+      content: text,
+      note: "已记录学生跟进建议，未修改学生业务状态。",
+    },
+    CREATE_LEAVE_MAKEUP_NOTE: {
+      resultType: "leave_makeup_note",
+      content: text,
+      note: "已生成请假补课处理备注，未自动审批或排课。",
+    },
+  };
+
+  return {
+    ...(resultByType[action.actionType] ?? { resultType: "ai_action_result", content: text }),
+    confirmationNote: confirmationNote ?? null,
+    generatedAt,
+  };
 }
 
 function tonePrefix(tone?: string) {
@@ -877,7 +963,7 @@ aiRouter.post(
   "/agent",
   validate({ body: aiAssistantSchema }),
   asyncHandler(async (req, res) => {
-    const { message } = req.body;
+    const { message, sessionId = randomUUID() } = req.body;
     const intent = detectIntent(message);
     const teacherId = await teacherProfileId(req.user);
     const ctx: RequestContext = { user: req.user, teacherId };
@@ -897,13 +983,30 @@ aiRouter.post(
     const safeProviderResult = sanitizeProviderResponse(providerResult, message);
     const providerName = process.env.AI_PROVIDER === "deepseek" && process.env.DEEPSEEK_API_KEY ? "deepseek" : "mock";
     const isRestrictedAction = safeProviderResult.intent === "restricted_action";
+    const persistedActions = isRestrictedAction ? [] : await Promise.all(safeProviderResult.proposedActions.map((action) => prisma.aiAction.create({
+      data: {
+        organizationId: req.user.organizationId,
+        userId: req.user.id,
+        sessionId,
+        message,
+        intent: safeProviderResult.intent || baseResult.intent,
+        actionType: action.actionType,
+        title: action.title,
+        description: action.description,
+        payload: JSON.parse(JSON.stringify(action.payload)) as Prisma.InputJsonValue,
+        riskLevel: action.riskLevel,
+        confidence: safeProviderResult.confidence,
+        requiresConfirmation: action.requiresConfirmation,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+    })));
 
     const result = {
       answer: safeProviderResult.answer || baseResult.answer,
       intent: safeProviderResult.intent || baseResult.intent,
       cards: isRestrictedAction ? [] : safeProviderResult.cards.length > 0 ? safeProviderResult.cards : baseResult.cards,
       actions: isRestrictedAction ? [] : baseResult.actions,
-      proposedActions: safeProviderResult.proposedActions,
+      proposedActions: persistedActions.map(toClientAiAction),
       warnings: safeProviderResult.warnings,
       confidence: safeProviderResult.confidence,
       provider: providerName,
@@ -919,6 +1022,118 @@ aiRouter.post(
     });
 
     return ok(res, result);
+  })
+);
+
+aiRouter.get(
+  "/agent/actions",
+  asyncHandler(async (req, res) => {
+    const actions = await prisma.aiAction.findMany({
+      where: {
+        organizationId: req.user.organizationId,
+        ...(req.user.role === "admin" || req.user.role === "academic_manager" ? {} : { userId: req.user.id }),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+
+    return ok(res, { actions: actions.map(toClientAiAction) });
+  })
+);
+
+aiRouter.get(
+  "/agent/actions/:id",
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req, res) => {
+    const action = await prisma.aiAction.findFirst({
+      where: { id: req.params.id, organizationId: req.user.organizationId },
+    });
+    if (!action) throw notFound("AI action");
+    if (!canManageAiAction(req.user, action) && action.userId !== req.user.id) {
+      throw new AppError(403, "FORBIDDEN", "当前账号无权查看该 AI 动作");
+    }
+
+    return ok(res, toClientAiAction(action));
+  })
+);
+
+aiRouter.post(
+  "/agent/actions/:id/confirm",
+  validate({ params: idParamSchema, body: confirmAiActionSchema }),
+  asyncHandler(async (req, res) => {
+    requireAiRoles(req.user, ["admin", "academic_manager", "advisor"], "当前账号无权确认 AI 动作");
+    const action = await prisma.aiAction.findFirst({
+      where: { id: req.params.id, organizationId: req.user.organizationId },
+    });
+    if (!action) throw notFound("AI action");
+    if (!canManageAiAction(req.user, action)) throw new AppError(403, "FORBIDDEN", "当前账号无权确认该 AI 动作");
+    if (action.status !== AiActionStatus.PROPOSED) {
+      throw new AppError(409, "AI_ACTION_NOT_PROPOSED", "该 AI 动作已处理，不能重复确认");
+    }
+    if (action.expiresAt.getTime() < Date.now()) {
+      await prisma.aiAction.update({
+        where: { id: action.id },
+        data: { status: AiActionStatus.EXPIRED, errorMessage: "AI 动作已过期" },
+      });
+      throw new AppError(409, "AI_ACTION_EXPIRED", "该 AI 动作已过期，请重新生成建议");
+    }
+
+    const executionResult = buildAiActionExecutionResult(action, req.body.confirmationNote);
+    const updated = await prisma.aiAction.update({
+      where: { id: action.id },
+      data: {
+        status: AiActionStatus.EXECUTED,
+        executedAt: new Date(),
+        executionResult: JSON.parse(JSON.stringify(executionResult)) as Prisma.InputJsonValue,
+        errorMessage: null,
+      },
+    });
+
+    await logAiOperation(req, "ai_action_confirmed", {
+      actionId: updated.id,
+      actionType: updated.actionType,
+      resultType: typeof executionResult.resultType === "string" ? executionResult.resultType : "ai_action_result",
+    });
+
+    return ok(res, {
+      action: toClientAiAction(updated),
+      executionResult,
+      message: "AI 动作已确认，安全结果已生成",
+    });
+  })
+);
+
+aiRouter.post(
+  "/agent/actions/:id/cancel",
+  validate({ params: idParamSchema, body: cancelAiActionSchema }),
+  asyncHandler(async (req, res) => {
+    const action = await prisma.aiAction.findFirst({
+      where: { id: req.params.id, organizationId: req.user.organizationId },
+    });
+    if (!action) throw notFound("AI action");
+    if (!canManageAiAction(req.user, action) && action.userId !== req.user.id) {
+      throw new AppError(403, "FORBIDDEN", "当前账号无权取消该 AI 动作");
+    }
+    if (action.status !== AiActionStatus.PROPOSED) {
+      throw new AppError(409, "AI_ACTION_NOT_PROPOSED", "该 AI 动作已处理，不能重复取消");
+    }
+
+    const updated = await prisma.aiAction.update({
+      where: { id: action.id },
+      data: {
+        status: AiActionStatus.CANCELLED,
+        cancelledAt: new Date(),
+        errorMessage: req.body.reason ?? null,
+      },
+    });
+
+    await logAiOperation(req, "ai_action_cancelled", {
+      actionId: updated.id,
+      actionType: updated.actionType,
+      reason: req.body.reason,
+    });
+
+    return ok(res, { action: toClientAiAction(updated), message: "AI 动作已取消" });
   })
 );
 
