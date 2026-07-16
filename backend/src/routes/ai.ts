@@ -24,6 +24,7 @@ import { getAiProvider } from "../services/ai/aiProvider.js";
 import { allowedAiActionTypes } from "../services/ai/aiSchemas.js";
 import { collectAiAgentData } from "../services/ai/aiDataCollector.js";
 import { sanitizeProviderResponse } from "../services/ai/aiSafety.js";
+import { buildRuleBasedActions } from "../services/ai/mockAiProvider.js";
 
 export const aiRouter = Router();
 
@@ -971,7 +972,7 @@ aiRouter.post(
     const baseResult = await handleAssistantRequest(intent, ctx);
     const aiData = await collectAiAgentData(ctx);
     const provider = getAiProvider();
-    const providerResult = await provider.generateAssistantResponse({
+    const providerInput = {
       message,
       intent: baseResult.intent,
       userRole: req.user.role,
@@ -979,11 +980,21 @@ aiRouter.post(
       cards: baseResult.cards,
       dataSummary: aiData.summary,
       allowedActions: [...allowedAiActionTypes],
-    });
+    };
+    const providerResult = await provider.generateAssistantResponse(providerInput);
     const safeProviderResult = sanitizeProviderResponse(providerResult, message);
     const providerName = process.env.AI_PROVIDER === "deepseek" && process.env.DEEPSEEK_API_KEY ? "deepseek" : "mock";
     const isRestrictedAction = safeProviderResult.intent === "restricted_action";
-    const persistedActions = isRestrictedAction ? [] : await Promise.all(safeProviderResult.proposedActions.map((action) => prisma.aiAction.create({
+    const proposedActions = isRestrictedAction ? [] : safeProviderResult.proposedActions.length > 0
+      ? safeProviderResult.proposedActions
+      : buildRuleBasedActions(providerInput);
+    const warnings = [
+      ...safeProviderResult.warnings,
+      ...(!isRestrictedAction && safeProviderResult.proposedActions.length === 0 && proposedActions.length > 0
+        ? ["DeepSeek 未返回确认动作，已使用安全规则生成待确认动作。"]
+        : []),
+    ];
+    const persistedActions = await Promise.all(proposedActions.map((action) => prisma.aiAction.create({
       data: {
         organizationId: req.user.organizationId,
         userId: req.user.id,
@@ -1007,7 +1018,7 @@ aiRouter.post(
       cards: isRestrictedAction ? [] : safeProviderResult.cards.length > 0 ? safeProviderResult.cards : baseResult.cards,
       actions: isRestrictedAction ? [] : baseResult.actions,
       proposedActions: persistedActions.map(toClientAiAction),
-      warnings: safeProviderResult.warnings,
+      warnings,
       confidence: safeProviderResult.confidence,
       provider: providerName,
       relatedData: isRestrictedAction ? {} : baseResult.relatedData ?? {},

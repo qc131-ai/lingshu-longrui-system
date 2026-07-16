@@ -7,7 +7,7 @@ function firstCardData(input: AiAssistantProviderInput) {
   return { card, data };
 }
 
-function buildRuleBasedActions(input: AiAssistantProviderInput): AiProviderResponse["proposedActions"] {
+export function buildRuleBasedActions(input: AiAssistantProviderInput): AiProviderResponse["proposedActions"] {
   const message = input.message;
   const { card, data } = firstCardData(input);
   const title = typeof card?.title === "string" ? card.title : "相关学员";
@@ -112,4 +112,3 @@ export function createMockAiProvider(): AiProvider {
     },
   };
 }
-
